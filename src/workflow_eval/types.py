@@ -161,7 +161,7 @@ class MitigationPriority(StrEnum):
 class Mitigation(BaseModel):
     """A single mitigation recommendation."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     action: MitigationAction
     priority: MitigationPriority
@@ -172,7 +172,7 @@ class Mitigation(BaseModel):
 class MitigationPlan(BaseModel):
     """Collection of mitigations with residual risk estimate."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     mitigations: tuple[Mitigation, ...]
     original_risk: float = Field(ge=0.0, le=1.0)
@@ -195,7 +195,7 @@ class ExecutionOutcome(StrEnum):
 class ExecutionRecord(BaseModel):
     """Observed outcome for one operation execution."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     node_id: str
     operation: str
@@ -206,6 +206,8 @@ class ExecutionRecord(BaseModel):
 
 class WorkflowExecution(BaseModel):
     """Full execution trace — stored for middle loop learning."""
+
+    model_config = ConfigDict(extra="forbid")
 
     id: str
     workflow_name: str
