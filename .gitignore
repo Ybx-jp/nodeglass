@@ -36,3 +36,8 @@ htmlcov/
 *.db
 *.sqlite
 *.sqlite3
+
+.claude
+.claude-flow
+CLAUDE.md
+.mcp.json
