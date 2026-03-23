@@ -41,6 +41,19 @@ class TestBuild:
         assert len(dag.nodes) == 1
         assert len(dag.edges) == 0
 
+    def test_build_with_pending_parallel_heads(self) -> None:
+        """build() without join() is valid — produces a DAG with leaf branches."""
+        dag = (
+            DAGBuilder("t")
+            .add_step("root", "read_file")
+            .parallel(["a", "b"], operation="send_email")
+            .build()
+        )
+        assert len(dag.nodes) == 3
+        assert len(dag.edges) == 2
+        edges = {(e.source, e.target) for e in dag.edges}
+        assert edges == {("root", "a"), ("root", "b")}
+
 
 # ---------------------------------------------------------------------------
 # add_step() and then()
@@ -212,6 +225,28 @@ class TestParallel:
                 .parallel(["a", "a"], operation="write_file")
             )
 
+    def test_empty_parallel_raises(self) -> None:
+        """parallel([]) with no node IDs is almost certainly a bug."""
+        with pytest.raises(ValueError, match="at least one"):
+            (
+                DAGBuilder("t")
+                .add_step("root", "read_file")
+                .parallel([], operation="write_file")
+            )
+
+    def test_single_element_parallel(self) -> None:
+        """parallel() with one ID works but requires join() before then()."""
+        dag = (
+            DAGBuilder("t")
+            .add_step("root", "read_file")
+            .parallel(["only"], operation="write_file")
+            .join("end", "send_email")
+            .build()
+        )
+        assert len(dag.nodes) == 3
+        edges = {(e.source, e.target) for e in dag.edges}
+        assert edges == {("root", "only"), ("only", "end")}
+
 
 # ---------------------------------------------------------------------------
 # join()
@@ -318,4 +353,18 @@ class TestFullPipeline:
             .build()
         )
         assert len(dag.nodes) == 5
-        assert len(dag.edges) == 5
+        nodes = {n.id: n for n in dag.nodes}
+        assert nodes["start"].operation == "read_file"
+        assert nodes["a"].operation == "invoke_api"
+        assert nodes["b"].operation == "invoke_api"
+        assert nodes["merge"].operation == "write_database"
+        assert nodes["done"].operation == "send_email"
+
+        edges = {(e.source, e.target) for e in dag.edges}
+        assert edges == {
+            ("start", "a"), ("start", "b"),
+            ("a", "merge"), ("b", "merge"),
+            ("merge", "done"),
+        }
+        for e in dag.edges:
+            assert e.edge_type == EdgeType.CONTROL_FLOW

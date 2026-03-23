@@ -116,10 +116,12 @@ class DAGBuilder:
         All nodes share the same operation and params. Chaining multiple
         parallel() calls accumulates branches from the same predecessor.
 
-        Raises ValueError if no cursor exists.
+        Raises ValueError if no cursor exists or node_ids is empty.
         """
         if self._cursor is None:
             raise ValueError("parallel() requires a preceding add_step()")
+        if not node_ids:
+            raise ValueError("parallel() requires at least one node ID")
         resolved_params = params or {}
         for nid in node_ids:
             self._add_node(nid, operation, resolved_params)
