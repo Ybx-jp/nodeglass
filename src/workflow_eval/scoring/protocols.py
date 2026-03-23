@@ -1,0 +1,1 @@
+"""Scorer protocol interface."""

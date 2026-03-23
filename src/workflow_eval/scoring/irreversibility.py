@@ -1,0 +1,1 @@
+"""Irreversibility depth scorer."""

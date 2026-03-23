@@ -1,0 +1,1 @@
+"""Concrete mitigation strategy rules."""
