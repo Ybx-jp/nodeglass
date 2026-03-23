@@ -72,6 +72,14 @@ class WorkflowDAG(BaseModel):
     edges: tuple[DAGEdge, ...]
     metadata: dict[str, Any] = Field(default_factory=dict)
 
+    @model_validator(mode="after")
+    def _unique_node_ids(self) -> WorkflowDAG:
+        ids = [n.id for n in self.nodes]
+        dupes = {x for x in ids if ids.count(x) > 1}
+        if dupes:
+            raise ValueError(f"Duplicate node IDs: {dupes}")
+        return self
+
 
 # ---------------------------------------------------------------------------
 # Scoring models
