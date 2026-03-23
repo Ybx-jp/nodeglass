@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from workflow_eval.ontology.effect_types import EffectTarget, EffectType
 
@@ -18,13 +18,15 @@ from workflow_eval.ontology.effect_types import EffectTarget, EffectType
 class OperationDefinition(BaseModel):
     """A single agent primitive in the ontology."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     name: str
     category: str
     base_risk_weight: float = Field(ge=0.0, le=1.0)
     effect_type: EffectType
     effect_targets: frozenset[EffectTarget]
+    preconditions: tuple[str, ...] = ()
+    postconditions: tuple[str, ...] = ()
 
 
 # ---------------------------------------------------------------------------
@@ -43,7 +45,7 @@ class EdgeType(StrEnum):
 class DAGNode(BaseModel):
     """A single step in a workflow DAG."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     id: str
     operation: str  # References OperationDefinition.name
@@ -53,7 +55,7 @@ class DAGNode(BaseModel):
 class DAGEdge(BaseModel):
     """Directed edge between two DAG nodes."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     source: str
     target: str
@@ -63,7 +65,7 @@ class DAGEdge(BaseModel):
 class WorkflowDAG(BaseModel):
     """Complete workflow graph — the primary input to scoring."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     name: str
     nodes: tuple[DAGNode, ...]
@@ -79,7 +81,7 @@ class WorkflowDAG(BaseModel):
 class SubScore(BaseModel):
     """Result from a single scorer."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     name: str
     score: float = Field(ge=0.0, le=1.0)
@@ -99,7 +101,7 @@ class RiskLevel(StrEnum):
 class ScoringConfig(BaseModel):
     """Weights for the six scorers. Must sum to 1.0."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     fan_out: float = 0.15
     chain_depth: float = 0.20
@@ -108,11 +110,21 @@ class ScoringConfig(BaseModel):
     spectral: float = 0.10
     compositional: float = 0.15
 
+    @model_validator(mode="after")
+    def _weights_sum_to_one(self) -> ScoringConfig:
+        total = (
+            self.fan_out + self.chain_depth + self.irreversibility
+            + self.centrality + self.spectral + self.compositional
+        )
+        if abs(total - 1.0) > 1e-6:
+            raise ValueError(f"Scorer weights must sum to 1.0, got {total:.6f}")
+        return self
+
 
 class RiskProfile(BaseModel):
     """Complete risk assessment for a workflow."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     workflow_name: str
     aggregate_score: float = Field(ge=0.0, le=1.0)

@@ -78,7 +78,7 @@ DEFAULT_OPERATIONS: tuple[OperationDefinition, ...] = (
     OperationDefinition(
         name="read_state",
         category="state",
-        base_risk_weight=0.05,
+        base_risk_weight=0.02,
         effect_type=_E.PURE,
         effect_targets=frozenset({_T.MEMORY}),
     ),
@@ -138,7 +138,7 @@ DEFAULT_OPERATIONS: tuple[OperationDefinition, ...] = (
     OperationDefinition(
         name="send_notification",
         category="communication",
-        base_risk_weight=0.30,
+        base_risk_weight=0.40,
         effect_type=_E.EXTERNAL,
         effect_targets=frozenset({_T.NETWORK, _T.USER_FACING}),
     ),
@@ -146,8 +146,8 @@ DEFAULT_OPERATIONS: tuple[OperationDefinition, ...] = (
     OperationDefinition(
         name="create_resource",
         category="resource",
-        base_risk_weight=0.35,
-        effect_type=_E.STATEFUL,
+        base_risk_weight=0.55,
+        effect_type=_E.EXTERNAL,
         effect_targets=frozenset({_T.NETWORK, _T.SYSTEM_CONFIG}),
     ),
     OperationDefinition(
@@ -160,10 +160,13 @@ DEFAULT_OPERATIONS: tuple[OperationDefinition, ...] = (
 )
 
 
-def load_defaults(registry: OperationRegistry | None = None) -> OperationRegistry:
-    """Populate a registry with the 20 default operations."""
-    if registry is None:
-        registry = OperationRegistry()
+def inject_defaults(registry: OperationRegistry) -> OperationRegistry:
+    """Register the 20 default operations into an existing registry."""
     for op in DEFAULT_OPERATIONS:
         registry.register(op)
     return registry
+
+
+def get_default_registry() -> OperationRegistry:
+    """Return a fresh registry populated with the 20 default operations."""
+    return inject_defaults(OperationRegistry())

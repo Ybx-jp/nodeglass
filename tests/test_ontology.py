@@ -6,10 +6,15 @@ from pathlib import Path
 import pytest
 import yaml
 
+from pydantic import ValidationError
+
 from workflow_eval.ontology.effect_types import EffectTarget, EffectType
 from workflow_eval.ontology.registry import OperationRegistry
-from workflow_eval.ontology.defaults import DEFAULT_OPERATIONS, load_defaults
-from workflow_eval.types import OperationDefinition
+from workflow_eval.ontology.defaults import DEFAULT_OPERATIONS, get_default_registry, inject_defaults
+from workflow_eval.types import (
+    DAGEdge, DAGNode, OperationDefinition, RiskProfile, RiskLevel,
+    ScoringConfig, SubScore, WorkflowDAG,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -99,6 +104,41 @@ class TestOperationDefinition:
                 effect_targets=frozenset(),
             )
 
+    def test_preconditions_postconditions(self) -> None:
+        op = OperationDefinition(
+            name="guarded_op",
+            category="test",
+            base_risk_weight=0.5,
+            effect_type=EffectType.EXTERNAL,
+            effect_targets=frozenset({EffectTarget.NETWORK}),
+            preconditions=("authenticated", "rate_limit_ok"),
+            postconditions=("audit_logged",),
+        )
+        assert op.preconditions == ("authenticated", "rate_limit_ok")
+        assert op.postconditions == ("audit_logged",)
+
+    def test_preconditions_default_empty(self) -> None:
+        op = OperationDefinition(
+            name="bare_op",
+            category="test",
+            base_risk_weight=0.1,
+            effect_type=EffectType.PURE,
+            effect_targets=frozenset(),
+        )
+        assert op.preconditions == ()
+        assert op.postconditions == ()
+
+    def test_rejects_extra_fields(self) -> None:
+        with pytest.raises(ValidationError):
+            OperationDefinition(
+                name="bad",
+                category="test",
+                base_risk_weight=0.5,
+                effect_type=EffectType.PURE,
+                effect_targets=frozenset(),
+                bogus_field="should fail",  # type: ignore[call-arg]
+            )
+
     def test_json_round_trip(self) -> None:
         op = OperationDefinition(
             name="round_trip",
@@ -166,6 +206,15 @@ class TestOperationRegistry:
         reg = OperationRegistry()
         with pytest.raises(KeyError, match="Unknown operation"):
             reg.get("nonexistent")
+
+    def test_reset(self) -> None:
+        reg = OperationRegistry()
+        reg.register(self._make_op("a"))
+        reg.register(self._make_op("b"))
+        assert len(reg) == 2
+        reg.reset()
+        assert len(reg) == 0
+        assert "a" not in reg
 
 
 # ---------------------------------------------------------------------------
@@ -251,14 +300,14 @@ class TestDefaultOntology:
         actual_names = {op.name for op in DEFAULT_OPERATIONS}
         assert actual_names == self.EXPECTED_NAMES
 
-    def test_load_defaults_populates_registry(self) -> None:
-        reg = load_defaults()
+    def test_get_default_registry(self) -> None:
+        reg = get_default_registry()
         assert len(reg) == 20
         for name in self.EXPECTED_NAMES:
             op = reg.get(name)
             assert 0.0 <= op.base_risk_weight <= 1.0
 
-    def test_load_defaults_into_existing_registry(self) -> None:
+    def test_inject_defaults_into_existing_registry(self) -> None:
         reg = OperationRegistry()
         custom = OperationDefinition(
             name="custom_op",
@@ -268,12 +317,12 @@ class TestDefaultOntology:
             effect_targets=frozenset({EffectTarget.SYSTEM_CONFIG}),
         )
         reg.register(custom)
-        load_defaults(reg)
+        inject_defaults(reg)
         assert len(reg) == 21
         assert "custom_op" in reg
 
     def test_risk_weights_match_spec(self) -> None:
-        reg = load_defaults()
+        reg = get_default_registry()
         assert reg.get("read_file").base_risk_weight == 0.05
         assert reg.get("delete_file").base_risk_weight == 0.80
         assert reg.get("delete_record").base_risk_weight == 0.85
@@ -283,17 +332,24 @@ class TestDefaultOntology:
         assert reg.get("send_email").base_risk_weight == 0.50
         assert reg.get("destroy_resource").base_risk_weight == 0.90
 
+    def test_risk_weights_corrected_values(self) -> None:
+        reg = get_default_registry()
+        assert reg.get("read_state").base_risk_weight == 0.02
+        assert reg.get("send_notification").base_risk_weight == 0.40
+        assert reg.get("create_resource").base_risk_weight == 0.55
+
     def test_effect_types_match_spec(self) -> None:
-        reg = load_defaults()
+        reg = get_default_registry()
         assert reg.get("read_file").effect_type == EffectType.PURE
         assert reg.get("write_file").effect_type == EffectType.STATEFUL
         assert reg.get("delete_file").effect_type == EffectType.IRREVERSIBLE
         assert reg.get("invoke_api").effect_type == EffectType.EXTERNAL
         assert reg.get("send_email").effect_type == EffectType.IRREVERSIBLE
         assert reg.get("destroy_resource").effect_type == EffectType.IRREVERSIBLE
+        assert reg.get("create_resource").effect_type == EffectType.EXTERNAL
 
     def test_effect_targets_match_spec(self) -> None:
-        reg = load_defaults()
+        reg = get_default_registry()
         assert reg.get("read_file").effect_targets == frozenset({EffectTarget.FILESYSTEM})
         assert reg.get("execute_code").effect_targets == frozenset(
             {EffectTarget.MEMORY, EffectTarget.FILESYSTEM, EffectTarget.NETWORK}
@@ -304,3 +360,51 @@ class TestDefaultOntology:
         assert reg.get("destroy_resource").effect_targets == frozenset(
             {EffectTarget.NETWORK, EffectTarget.SYSTEM_CONFIG}
         )
+
+
+# ---------------------------------------------------------------------------
+# NOD-6: ScoringConfig validation + extra="forbid" on DAG/scoring models
+# ---------------------------------------------------------------------------
+
+
+class TestScoringConfig:
+    def test_default_weights_valid(self) -> None:
+        cfg = ScoringConfig()
+        total = cfg.fan_out + cfg.chain_depth + cfg.irreversibility + cfg.centrality + cfg.spectral + cfg.compositional
+        assert abs(total - 1.0) < 1e-9
+
+    def test_rejects_weights_not_summing_to_one(self) -> None:
+        with pytest.raises(ValidationError, match="must sum to 1.0"):
+            ScoringConfig(fan_out=0.5, chain_depth=0.5, irreversibility=0.5)
+
+    def test_rejects_extra_fields(self) -> None:
+        with pytest.raises(ValidationError):
+            ScoringConfig(bogus=0.1)  # type: ignore[call-arg]
+
+
+class TestExtraForbid:
+    def test_dag_node_rejects_extra(self) -> None:
+        with pytest.raises(ValidationError):
+            DAGNode(id="a", operation="read_file", extra_field="bad")  # type: ignore[call-arg]
+
+    def test_dag_edge_rejects_extra(self) -> None:
+        with pytest.raises(ValidationError):
+            DAGEdge(source="a", target="b", extra_field="bad")  # type: ignore[call-arg]
+
+    def test_workflow_dag_rejects_extra(self) -> None:
+        with pytest.raises(ValidationError):
+            WorkflowDAG(
+                name="test", nodes=(), edges=(), extra_field="bad",  # type: ignore[call-arg]
+            )
+
+    def test_sub_score_rejects_extra(self) -> None:
+        with pytest.raises(ValidationError):
+            SubScore(name="x", score=0.5, weight=0.1, extra_field="bad")  # type: ignore[call-arg]
+
+    def test_risk_profile_rejects_extra(self) -> None:
+        with pytest.raises(ValidationError):
+            RiskProfile(
+                workflow_name="test", aggregate_score=0.5,
+                risk_level=RiskLevel.MEDIUM, sub_scores=(),
+                node_count=1, edge_count=0, extra_field="bad",  # type: ignore[call-arg]
+            )

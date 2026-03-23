@@ -43,6 +43,10 @@ class OperationRegistry:
     def __contains__(self, name: str) -> bool:
         return name in self._ops
 
+    def reset(self) -> None:
+        """Clear all registered operations."""
+        self._ops.clear()
+
     @classmethod
     def from_yaml(cls, path: str | Path) -> OperationRegistry:
         """Load a registry from a YAML file.
