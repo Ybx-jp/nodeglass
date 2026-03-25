@@ -31,8 +31,8 @@ def _linear_dag() -> WorkflowDAG:
             DAGNode(id="c", operation="send_email"),
         ),
         edges=(
-            DAGEdge(source="a", target="b", edge_type=EdgeType.DATA_FLOW),
-            DAGEdge(source="b", target="c"),
+            DAGEdge(source_id="a", target_id="b", edge_type=EdgeType.DATA_FLOW),
+            DAGEdge(source_id="b", target_id="c"),
         ),
         metadata={"version": 1},
     )
@@ -177,9 +177,9 @@ class TestFromNetworkx:
     def test_edge_data_preserved(self) -> None:
         original = _linear_dag()
         restored = from_networkx(to_networkx(original))
-        orig_edges = {(e.source, e.target): e for e in original.edges}
+        orig_edges = {(e.source_id, e.target_id): e for e in original.edges}
         for edge in restored.edges:
-            orig = orig_edges[(edge.source, edge.target)]
+            orig = orig_edges[(edge.source_id, edge.target_id)]
             assert edge.edge_type == orig.edge_type
 
     def test_empty_dag_round_trip(self) -> None:
@@ -266,7 +266,7 @@ class TestJsonRoundTrip:
             assert node.operation == orig_by_id[node.id].operation
             assert node.params == orig_by_id[node.id].params
         # Compare edges
-        orig_edges = {(e.source, e.target): e for e in original.edges}
+        orig_edges = {(e.source_id, e.target_id): e for e in original.edges}
         for edge in via_json.edges:
-            orig = orig_edges[(edge.source, edge.target)]
+            orig = orig_edges[(edge.source_id, edge.target_id)]
             assert edge.edge_type == orig.edge_type

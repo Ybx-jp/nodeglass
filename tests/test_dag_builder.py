@@ -51,7 +51,7 @@ class TestBuild:
         )
         assert len(dag.nodes) == 3
         assert len(dag.edges) == 2
-        edges = {(e.source, e.target) for e in dag.edges}
+        edges = {(e.source_id, e.target_id) for e in dag.edges}
         assert edges == {("root", "a"), ("root", "b")}
 
 
@@ -70,8 +70,8 @@ class TestLinearChain:
         )
         assert len(dag.nodes) == 2
         assert len(dag.edges) == 1
-        assert dag.edges[0].source == "a"
-        assert dag.edges[0].target == "b"
+        assert dag.edges[0].source_id == "a"
+        assert dag.edges[0].target_id == "b"
         assert dag.edges[0].edge_type == EdgeType.CONTROL_FLOW
 
     def test_three_step_chain(self) -> None:
@@ -84,7 +84,7 @@ class TestLinearChain:
         )
         assert len(dag.nodes) == 3
         assert len(dag.edges) == 2
-        edges = {(e.source, e.target) for e in dag.edges}
+        edges = {(e.source_id, e.target_id) for e in dag.edges}
         assert ("a", "b") in edges
         assert ("b", "c") in edges
 
@@ -101,8 +101,8 @@ class TestLinearChain:
             .build()
         )
         assert len(dag.edges) == 1
-        assert dag.edges[0].source == "a"
-        assert dag.edges[0].target == "b"
+        assert dag.edges[0].source_id == "a"
+        assert dag.edges[0].target_id == "b"
 
     def test_params_preserved(self) -> None:
         dag = (
@@ -143,9 +143,9 @@ class TestParallel:
             .join("end", "send_notification")
             .build()
         )
-        edges_from_root = [e for e in dag.edges if e.source == "root"]
+        edges_from_root = [e for e in dag.edges if e.source_id == "root"]
         assert len(edges_from_root) == 2
-        targets = {e.target for e in edges_from_root}
+        targets = {e.target_id for e in edges_from_root}
         assert targets == {"a", "b"}
 
     def test_parallel_nodes_share_operation(self) -> None:
@@ -172,13 +172,13 @@ class TestParallel:
             .build()
         )
         # All 4 branches fan from root
-        edges_from_root = [e for e in dag.edges if e.source == "root"]
+        edges_from_root = [e for e in dag.edges if e.source_id == "root"]
         assert len(edges_from_root) == 4
-        targets = {e.target for e in edges_from_root}
+        targets = {e.target_id for e in edges_from_root}
         assert targets == {"a", "b", "c", "d"}
 
         # join converges all 4
-        edges_to_end = [e for e in dag.edges if e.target == "end"]
+        edges_to_end = [e for e in dag.edges if e.target_id == "end"]
         assert len(edges_to_end) == 4
 
     def test_parallel_without_cursor_raises(self) -> None:
@@ -193,7 +193,7 @@ class TestParallel:
             .join("end", "send_email")
             .build()
         )
-        edges_from_root = [e for e in dag.edges if e.source == "root"]
+        edges_from_root = [e for e in dag.edges if e.source_id == "root"]
         for e in edges_from_root:
             assert e.edge_type == EdgeType.DATA_FLOW
 
@@ -244,7 +244,7 @@ class TestParallel:
             .build()
         )
         assert len(dag.nodes) == 3
-        edges = {(e.source, e.target) for e in dag.edges}
+        edges = {(e.source_id, e.target_id) for e in dag.edges}
         assert edges == {("root", "only"), ("only", "end")}
 
 
@@ -262,9 +262,9 @@ class TestJoin:
             .join("end", "send_notification")
             .build()
         )
-        edges_to_end = [e for e in dag.edges if e.target == "end"]
+        edges_to_end = [e for e in dag.edges if e.target_id == "end"]
         assert len(edges_to_end) == 3
-        sources = {e.source for e in edges_to_end}
+        sources = {e.source_id for e in edges_to_end}
         assert sources == {"a", "b", "c"}
 
     def test_join_without_parallel_acts_like_then(self) -> None:
@@ -275,8 +275,8 @@ class TestJoin:
             .build()
         )
         assert len(dag.edges) == 1
-        assert dag.edges[0].source == "a"
-        assert dag.edges[0].target == "b"
+        assert dag.edges[0].source_id == "a"
+        assert dag.edges[0].target_id == "b"
 
     def test_join_resets_parallel_heads(self) -> None:
         """After join(), then() should work normally."""
@@ -290,7 +290,7 @@ class TestJoin:
         )
         assert len(dag.nodes) == 5
         # mid -> end edge exists
-        assert any(e.source == "mid" and e.target == "end" for e in dag.edges)
+        assert any(e.source_id == "mid" and e.target_id == "end" for e in dag.edges)
 
     def test_join_custom_edge_type(self) -> None:
         dag = (
@@ -300,7 +300,7 @@ class TestJoin:
             .join("end", "send_email", edge_type=EdgeType.DATA_FLOW)
             .build()
         )
-        edges_to_end = [e for e in dag.edges if e.target == "end"]
+        edges_to_end = [e for e in dag.edges if e.target_id == "end"]
         for e in edges_to_end:
             assert e.edge_type == EdgeType.DATA_FLOW
 
@@ -334,7 +334,7 @@ class TestFullPipeline:
         assert nodes["delete_files"].operation == "delete_record"
         assert nodes["notify"].operation == "send_notification"
 
-        edges = {(e.source, e.target) for e in dag.edges}
+        edges = {(e.source_id, e.target_id) for e in dag.edges}
         assert ("auth", "lookup") in edges
         assert ("lookup", "delete_posts") in edges
         assert ("lookup", "delete_files") in edges
@@ -360,7 +360,7 @@ class TestFullPipeline:
         assert nodes["merge"].operation == "write_database"
         assert nodes["done"].operation == "send_email"
 
-        edges = {(e.source, e.target) for e in dag.edges}
+        edges = {(e.source_id, e.target_id) for e in dag.edges}
         assert edges == {
             ("start", "a"), ("start", "b"),
             ("a", "merge"), ("b", "merge"),
