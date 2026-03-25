@@ -1,0 +1,20 @@
+name: safe-read-pipeline
+metadata:
+  description: "Pure read operations only. Expected risk: low."
+  version: 1
+
+nodes:
+  - id: read_file
+    operation: read_file
+  - id: read_db
+    operation: read_database
+  - id: read_state
+    operation: read_state
+
+edges:
+  - source_id: read_file
+    target_id: read_db
+    edge_type: data_flow
+  - source_id: read_db
+    target_id: read_state
+    edge_type: data_flow

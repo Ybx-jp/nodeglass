@@ -1,0 +1,42 @@
+name: risky-delete-cascade
+metadata:
+  description: "Auth then fan out to parallel deletes, join to notify. Expected risk: high or critical."
+  version: 1
+
+nodes:
+  - id: auth
+    operation: authenticate
+    params:
+      method: jwt
+  - id: lookup
+    operation: read_database
+    params:
+      table: users
+  - id: delete_records
+    operation: delete_record
+    params:
+      table: users
+  - id: delete_posts
+    operation: delete_record
+    params:
+      table: posts
+  - id: delete_files
+    operation: delete_file
+  - id: notify
+    operation: send_notification
+
+edges:
+  - source_id: auth
+    target_id: lookup
+  - source_id: lookup
+    target_id: delete_records
+  - source_id: lookup
+    target_id: delete_posts
+  - source_id: lookup
+    target_id: delete_files
+  - source_id: delete_records
+    target_id: notify
+  - source_id: delete_posts
+    target_id: notify
+  - source_id: delete_files
+    target_id: notify
