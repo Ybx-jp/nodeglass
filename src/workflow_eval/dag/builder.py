@@ -55,7 +55,7 @@ class DAGBuilder:
         self._node_ids.add(node_id)
 
     def _add_edge(self, source: str, target: str, edge_type: EdgeType) -> None:
-        self._edges.append(DAGEdge(source=source, target=target, edge_type=edge_type))
+        self._edges.append(DAGEdge(source_id=source, target_id=target, edge_type=edge_type))
 
     def add_step(
         self,

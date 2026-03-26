@@ -404,7 +404,7 @@ class TestDAGModels:
         assert DAGNode.model_validate_json(node.model_dump_json()) == node
 
     def test_dag_edge_round_trip(self) -> None:
-        edge = DAGEdge(source="a", target="b", edge_type=EdgeType.DATA_FLOW)
+        edge = DAGEdge(source_id="a", target_id="b", edge_type=EdgeType.DATA_FLOW)
         assert DAGEdge.model_validate_json(edge.model_dump_json()) == edge
 
     def test_workflow_dag_round_trip(self) -> None:
@@ -412,7 +412,7 @@ class TestDAGModels:
             name="test",
             nodes=(DAGNode(id="a", operation="read_file"),
                    DAGNode(id="b", operation="write_file")),
-            edges=(DAGEdge(source="a", target="b"),),
+            edges=(DAGEdge(source_id="a", target_id="b"),),
             metadata={"version": 1},
         )
         assert WorkflowDAG.model_validate_json(dag.model_dump_json()) == dag
@@ -517,7 +517,7 @@ class TestExtraForbid:
 
     def test_dag_edge_rejects_extra(self) -> None:
         with pytest.raises(ValidationError):
-            DAGEdge(source="a", target="b", extra_field="bad")  # type: ignore[call-arg]
+            DAGEdge(source_id="a", target_id="b", extra_field="bad")  # type: ignore[call-arg]
 
     def test_workflow_dag_rejects_extra(self) -> None:
         with pytest.raises(ValidationError):

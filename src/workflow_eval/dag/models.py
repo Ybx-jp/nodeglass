@@ -35,13 +35,16 @@ def to_networkx(dag: WorkflowDAG) -> nx.DiGraph:
             node.id,
             operation=node.operation,
             params=node.params,
+            metadata=node.metadata,
         )
 
     for edge in dag.edges:
         g.add_edge(
-            edge.source,
-            edge.target,
+            edge.source_id,
+            edge.target_id,
             edge_type=edge.edge_type.value,
+            condition=edge.condition,
+            metadata=edge.metadata,
         )
 
     return g
@@ -59,15 +62,18 @@ def from_networkx(g: nx.DiGraph) -> WorkflowDAG:
             id=str(node_id),
             operation=attrs["operation"],
             params=attrs.get("params", {}),
+            metadata=attrs.get("metadata", {}),
         )
         for node_id, attrs in g.nodes(data=True)
     )
 
     edges = tuple(
         DAGEdge(
-            source=str(src),
-            target=str(tgt),
+            source_id=str(src),
+            target_id=str(tgt),
             edge_type=EdgeType(attrs.get("edge_type", EdgeType.CONTROL_FLOW.value)),
+            condition=attrs.get("condition"),
+            metadata=attrs.get("metadata", {}),
         )
         for src, tgt, attrs in g.edges(data=True)
     )

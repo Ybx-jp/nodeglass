@@ -50,6 +50,7 @@ class DAGNode(BaseModel):
     id: str
     operation: str  # References OperationDefinition.name
     params: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class DAGEdge(BaseModel):
@@ -57,9 +58,11 @@ class DAGEdge(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    source: str
-    target: str
+    source_id: str
+    target_id: str
     edge_type: EdgeType = EdgeType.CONTROL_FLOW
+    condition: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class WorkflowDAG(BaseModel):
