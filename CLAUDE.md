@@ -25,7 +25,6 @@
 - Always verify the build succeeds before committing.
 - Always read a file before editing it.
 - Always use python3 when invoking python from command line
-- 
 
 ## Security
 
