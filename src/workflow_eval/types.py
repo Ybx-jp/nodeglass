@@ -98,6 +98,7 @@ class SubScore(BaseModel):
     score: float = Field(ge=0.0, le=1.0)
     weight: float = Field(ge=0.0, le=1.0)
     details: dict[str, Any] = Field(default_factory=dict)
+    flagged_nodes: tuple[str, ...] = ()
 
 
 class RiskLevel(StrEnum):
