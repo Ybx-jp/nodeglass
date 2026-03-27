@@ -1,9 +1,10 @@
 # Phase 2 DAG Layer — Implementation Log & Design Decisions
 
-**Date**: 2026-03-22 / 2026-03-23
+**Date**: 2026-03-22 / 2026-03-26
 **Branch**: `phase2/yolo-full-send`
-**Issues**: NOD-11 (DAG model + networkx), NOD-12 (DAGBuilder fluent API)
+**Issues**: NOD-11 (DAG model + networkx), NOD-12 (DAGBuilder fluent API), NOD-13 (YAML/JSON loading), NOD-14 (DAG validation), NOD-15 (example workflows)
 **Milestone**: Phase 2: DAG Layer
+**PR**: #3 (NOD-13, NOD-14, NOD-15 + schema field renames)
 
 ---
 
@@ -155,18 +156,171 @@ Option 3 was chosen. The builder is a construction convenience, not a semantic a
 
 ---
 
-## Module structure after Phase 2 (so far)
+---
+
+## NOD-13: YAML/JSON schema loading
+
+### What was built
+
+**File**: `src/workflow_eval/dag/schema.py` (~30 lines of logic)
+**Tests**: `tests/test_dag_schema.py` (22 tests across 5 classes)
+
+Single public function: `load_workflow(path: Path | str) -> WorkflowDAG`
+- Supports `.yaml`, `.yml`, `.json` extensions
+- YAML parsed via `yaml.safe_load`, JSON via `json.loads`
+- Validates against `WorkflowDAG` Pydantic model
+
+### Design decision: loader delegates all schema validation to Pydantic
+
+**Decision**: `load_workflow()` parses YAML/JSON into a dict and calls `WorkflowDAG.model_validate(data)`. No hand-written schema checks.
+
+**Why**: Pydantic already enforces required fields, types, `extra="forbid"`, enum values, and the unique node ID validator. Duplicating any of this in the loader would create two sources of truth that could drift. ~30 lines of logic is the result.
+
+**Downstream effect**: Any schema change (e.g. adding a field to `DAGNode`) automatically applies to file loading with zero loader changes. The tradeoff is that Pydantic validation errors from malformed files can be verbose — but they're accurate, and the loader wraps them with file path context.
+
+### Design decision: YAML gets an explicit dict check; JSON does not
+
+**Decision**: The loader checks `isinstance(result, dict)` after `yaml.safe_load` and raises a clear `ValueError`. No such check for JSON.
+
+**Why**: `yaml.safe_load` can return `None` (empty file) or a list (YAML array), which would confuse Pydantic with unhelpful errors like "expected dict, got NoneType". For JSON, `json.loads` on a non-dict feeds into `model_validate` which raises a descriptive `ValidationError` — no extra check needed.
+
+**Downstream effect**: Error messages for malformed YAML files are human-readable ("Expected a YAML mapping, got ...") rather than cryptic Pydantic internals.
+
+### Design decision: structural validation deferred to validate_dag()
+
+**Decision**: The loader only parses and constructs — it does not check for dangling edges, orphan nodes, or cycles.
+
+**Why**: The Linear issue explicitly states: "structural validation belongs in `validate_dag()` (NOD-14), not here." The loader is a boundary validator for file format, not graph semantics. A file can load successfully but still contain a DAG with structural warnings/errors that `validate_dag()` will flag.
+
+**Downstream effect**: Callers must run `validate_dag()` after `load_workflow()` if they want semantic guarantees. This is a deliberate two-step pattern that keeps concerns separated and allows callers to decide how strict they want to be (e.g. the MCP server may want to load and validate in one shot, but a debugging tool may want to load a broken DAG for inspection).
+
+### Review fixes applied (dag-tests3.md)
+
+4 items found, 0 inaccuracies:
+- Strengthened `test_metadata_preserved` to assert full dict
+- Added tests for: malformed JSON (JSONDecodeError), non-dict JSON (ValidationError), duplicate node IDs through `load_workflow()` entrypoint
+
+---
+
+## NOD-14: DAG validation
+
+### What was built
+
+**File**: `src/workflow_eval/dag/validation.py`
+**Tests**: `tests/test_dag_validation.py` (25 tests across 8 classes)
+
+Public function: `validate_dag(dag, registry) -> list[ValidationIssue]`
+
+5 independent checks:
+
+| Check | Level | Code |
+|---|---|---|
+| Edge reference integrity (source_id/target_id exist) | ERROR | `dangling_source` / `dangling_target` |
+| Operation resolution (every node op in registry) | ERROR | `unknown_operation` |
+| Orphan nodes (no incoming AND no outgoing edges) | WARNING | `orphan_node` |
+| Root detection (at least one node with no incoming) | WARNING | `no_root` |
+| Cycle detection (via `nx.find_cycle`) | WARNING | `cycle_detected` |
+
+Supporting types: `ValidationIssue` (level, code, message, node_ids), `ValidationLevel` (StrEnum: warning, error).
+
+### Design decision: all checks run, never short-circuit
+
+**Decision**: `validate_dag()` always runs all 5 checks and returns the full list.
+
+**Why**: Callers decide how to handle issues — filter by level, reject on errors only, etc. Short-circuiting on the first error would hide secondary problems. This is critical for the MCP server (NOD-28) which needs to present all findings to the agent in one response.
+
+**Downstream effect**: The function is always O(V+E) regardless of input. No "fast fail" mode exists. If a future caller needs early exit, they can wrap with a short-circuiting helper — but the core function stays complete.
+
+### Design decision: cycles are warnings, not errors
+
+**Decision**: Cycle detection produces WARNING-level issues, not ERROR.
+
+**Why**: The spec is explicit: "flags cycles as warnings (does NOT reject the DAG)." Some agent workflows intentionally include retry loops. The scoring engine uses cycle presence in the spectral scorer as a risk signal, but the workflow itself is still valid to analyze.
+
+**Downstream effect**: A DAG with cycles will pass validation (no errors), but the warnings will be available for scoring and display. Callers that want to reject cyclic DAGs can filter for the `cycle_detected` code.
+
+### Design decision: edge integrity checked before cycle detection
+
+**Decision**: `_check_edge_integrity` runs before `_check_cycles`.
+
+**Why**: `to_networkx()` silently auto-creates phantom nodes from dangling edges. If cycle detection ran first, a dangling edge forming a loop (e.g. `a→ghost, ghost→a`) would produce a confusing cycle warning involving a node that doesn't exist in the original DAG. By flagging the dangling edge first, the caller gets both issues but can prioritize the root cause.
+
+**Downstream effect**: Tested explicitly in `test_phantom_node_cycle_from_dangling_edges`. The ordering is a correctness concern, not just UX — downstream code that processes issues in order can treat the first error as the root cause.
+
+### Design decision: single-node DAGs are not orphans
+
+**Decision**: `_check_orphan_nodes` skips DAGs with 0 or 1 nodes.
+
+**Why**: A single-node DAG with no edges is a valid trivial workflow, not an orphan. The orphan check only makes sense when there are multiple nodes and some are disconnected from the graph.
+
+**Downstream effect**: Trivial DAGs (common in tests and examples) don't produce spurious warnings.
+
+### Design decision: no_root issue has empty node_ids
+
+**Decision**: When every node has incoming edges (implying a cycle), the `no_root` warning uses `node_ids=()`.
+
+**Why**: All nodes are equally "not a root" — listing them all would be noise. The root cause is the cycle, which is flagged separately.
+
+**Downstream effect**: Tested explicitly after review feedback. Consumers can detect this case by checking `code == "no_root" and len(node_ids) == 0`.
+
+### Review fixes applied (dag-tests4.md)
+
+6 items found, 0 inaccuracies:
+- 3 weak assertions tightened: added level assertion to dangling source test, narrowed frozen test from `Exception` to `ValidationError`, exact issue count in multiple-issues test
+- 3 coverage gaps filled: phantom-node cycle from dangling edges, multiple orphans in isolation, `no_root` node_ids assertion
+
+---
+
+## NOD-15: Example workflow YAML files
+
+### What was built
+
+**Files**: `examples/sample_workflows/` — 3 example files
+**Tests**: `tests/test_dag_examples.py` (validation + structural distinctness)
+
+| File | Nodes | Pattern | Operations | Expected risk |
+|---|---|---|---|---|
+| `safe_read_pipeline.yaml` | 3 | Linear chain | read_file, read_database, read_state | Low |
+| `risky_delete_cascade.yaml` | 6 | Fan-out deletes | authenticate, read_database, delete_record ×2, delete_file, invoke_api | High/critical |
+| `moderate_api_chain.json` | 4 | Linear chain | read_database, mutate_state, invoke_api, write_database | Medium |
+
+### Design decision: structural distinctness verified by test
+
+**Decision**: A dedicated test asserts that the 3 example files are structurally distinct (different node counts, edge counts, and operation sets).
+
+**Why**: AC #3 requires structural distinctness. Rather than relying on visual inspection, the test makes this machine-verifiable and prevents future changes to the example files from accidentally making them isomorphic.
+
+**Downstream effect**: When the scoring engine (Phase 3, NOD-25) is implemented, these files will serve as integration test fixtures. The structural distinctness guarantee means they'll exercise different scoring code paths.
+
+---
+
+## Schema field renames (PR #3, breaking)
+
+**Change**: `DAGEdge.source` → `source_id`, `DAGEdge.target` → `target_id`. `DAGEdge` gained `condition: str | None` and `metadata: dict[str, Any]`. `DAGNode` gained `metadata: dict[str, Any]`.
+
+**Why**: The `source`/`target` names conflicted with Pydantic's internal namespace and were ambiguous (source of what?). The `_id` suffix makes it clear these are foreign keys referencing node IDs. The new `metadata` and `condition` fields were needed for the validation and scoring layers.
+
+**Scope**: All consumers updated: `models.py`, `builder.py`, all test files. This was done as part of PR #3 to batch the breaking change with the new code that needed the new field names.
+
+---
+
+## Module structure after Phase 2
 
 ```
 src/workflow_eval/dag/
-├── __init__.py          # Re-exports: DAGBuilder, from_networkx, to_networkx, validate_unique_node_ids
+├── __init__.py          # Public API: DAGBuilder, ValidationIssue, ValidationLevel,
+│                        #   from_networkx, load_workflow, to_networkx, validate_dag,
+│                        #   validate_unique_node_ids
 ├── builder.py           # DAGBuilder fluent API (NOD-12)
 ├── models.py            # networkx conversion + standalone validator (NOD-11)
-├── schema.py            # (stub) YAML/JSON loading — NOD-13
-└── validation.py        # (stub) DAG validation — NOD-14
-```
+├── schema.py            # YAML/JSON loading (NOD-13)
+└── validation.py        # DAG validation (NOD-14)
 
-The `dag/__init__.py` serves as the public API for the DAG layer. Downstream code (scoring, mitigation, API) should import from `workflow_eval.dag`, not from submodules directly. This gives us freedom to refactor internal file boundaries without breaking consumers.
+examples/sample_workflows/
+├── safe_read_pipeline.yaml      # 3 read ops, linear (NOD-15)
+├── risky_delete_cascade.yaml    # 6 nodes, fan-out deletes (NOD-15)
+└── moderate_api_chain.json      # 4 nodes, linear API chain (NOD-15)
+```
 
 ---
 
@@ -176,8 +330,11 @@ The `dag/__init__.py` serves as the public API for the DAG layer. Downstream cod
 |---|---|---|---|
 | `test_dag_models.py` | 27 | 6 | Construction, uniqueness (model + standalone), to_networkx attrs, from_networkx round-trip + defaults + error paths, JSON round-trip, full cycle |
 | `test_dag_builder.py` | 27 | 6 | build() basics, linear chain, parallel fan-out + chaining, join convergence, error paths, full pipeline matching Linear example |
+| `test_dag_schema.py` | 22 | 5 | YAML/JSON loading, extension handling, malformed input, metadata preservation, duplicate IDs through loader |
+| `test_dag_validation.py` | 25 | 8 | All 5 checks, phantom-node cycles, multiple orphans, no_root empty node_ids, multiple simultaneous issues |
+| `test_dag_examples.py` | — | — | Example file loading, validate_dag pass, structural distinctness |
 
-Total DAG layer tests: 54
+Total DAG layer tests: 104 (+ 115 Phase 1 = 219 total)
 
 ---
 
@@ -185,7 +342,6 @@ Total DAG layer tests: 54
 
 | Item | Target issue | Context |
 |---|---|---|
-| Dangling edge detection | NOD-14 | Edges can reference nonexistent node IDs. `to_networkx()` masks this by auto-creating nodes. Comment with suggested test added to Linear. |
-| YAML/JSON loading | NOD-13 | `from_networkx()` defaults are designed to support intermediate graph construction from schema loaders. |
 | Builder doesn't support arbitrary cross-edges | — | Diamond patterns, skip connections, etc. require manual `WorkflowDAG` construction or the YAML loader. Not a gap for the MVP use case. |
-| Builder doesn't validate operations against registry | NOD-14 | Deliberate — the builder is ontology-agnostic. `validate_dag()` checks operation resolution. |
+| Scoring the example files | NOD-25 | NOD-15 AC #4 (risk level verification) deferred to Phase 3 scoring. |
+| NOD-16: DAG unit tests consolidation | NOD-16 | Coverage is already strong (104 tests). May just need a consolidation pass. |
