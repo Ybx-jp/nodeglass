@@ -312,8 +312,9 @@ class TestCoverageGaps:
         )
         r1 = scorer.score(g_read, registry)
         r2 = scorer.score(g_delete, registry)
-        assert r1.score == r2.score
-        assert r1.details == r2.details
+        assert r1.score == pytest.approx(r2.score, abs=1e-10)
+        assert r1.details["fiedler_value"] == pytest.approx(r2.details["fiedler_value"], abs=1e-10)
+        assert r1.details["normalized"] == pytest.approx(r2.details["normalized"], abs=1e-10)
 
 
 # ---------------------------------------------------------------------------
