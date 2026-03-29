@@ -144,6 +144,8 @@ class RiskProfile(BaseModel):
     sub_scores: tuple[SubScore, ...]
     node_count: int
     edge_count: int
+    critical_paths: tuple[tuple[str, ...], ...] = ()
+    chokepoints: tuple[str, ...] = ()
 
 
 # ---------------------------------------------------------------------------

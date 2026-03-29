@@ -1,8 +1,10 @@
 """Scoring engine — six risk scorers and weighted aggregation."""
 
+from workflow_eval.scoring.aggregator import aggregate, apply_weights, classify_risk
 from workflow_eval.scoring.centrality import CentralityScorer
 from workflow_eval.scoring.chain_depth import ChainDepthScorer
 from workflow_eval.scoring.compositional import CompositionalScorer
+from workflow_eval.scoring.engine import RiskScoringEngine
 from workflow_eval.scoring.fan_out import FanOutScorer
 from workflow_eval.scoring.irreversibility import IrreversibilityScorer
 from workflow_eval.scoring.protocols import Scorer
@@ -14,6 +16,10 @@ __all__ = [
     "CompositionalScorer",
     "FanOutScorer",
     "IrreversibilityScorer",
+    "RiskScoringEngine",
     "Scorer",
     "SpectralScorer",
+    "aggregate",
+    "apply_weights",
+    "classify_risk",
 ]
