@@ -200,13 +200,13 @@ class TestDeepChain:
         result = scorer.score(g, registry)
         assert result.score == pytest.approx(0.25, abs=0.01)
 
-    def test_depth_amplifies_score(
+    def test_pure_nodes_dilute_uncertainty_ratio(
         self, scorer: IrreversibilityScorer, registry: OperationRegistry
     ) -> None:
-        # Same uncertainty ratio but at different depths should give different scores.
-        # Shallow: invoke_api -> delete_record (depth 1/1 = 1.0, uncertain 1/1 = 1.0) -> 1.0
+        # Adding pure nodes between external and irreversible dilutes the uncertainty ratio.
+        # Shallow: invoke_api -> delete_record (uncertain 1/1, depth 1/1) -> 1.0
         # Deep: invoke_api -> read_file -> read_database -> delete_record
-        #   depth = 3/3 = 1.0, uncertain = 1/3 -> 0.333
+        #   uncertain = 1/3 (diluted by pure nodes), depth = 3/3 = 1.0 -> 0.333
         shallow = _make_graph(
             {"a": "invoke_api", "b": "delete_record"},
             [("a", "b")],
@@ -260,7 +260,8 @@ class TestFlaggedNodes:
             [("a", "b")],
         )
         result = scorer.score(g, registry)
-        assert "b" in result.flagged_nodes
+        assert result.flagged_nodes == ("b",)
+        assert "a" not in result.flagged_nodes
 
     def test_low_risk_irreversible_not_flagged(
         self, scorer: IrreversibilityScorer, registry: OperationRegistry
@@ -290,13 +291,14 @@ class TestFlaggedNodes:
         result = scorer.score(g, registry)
         assert result.flagged_nodes == ()
 
-    def test_multiple_irreversible_some_flagged(
+    def test_multiple_irreversible_both_flagged(
         self, scorer: IrreversibilityScorer, registry: OperationRegistry
     ) -> None:
-        # Two irreversible nodes with different risks:
-        # invoke_api -> delete_record (irrev_risk = 1.0 > 0.3 -> flagged)
-        # invoke_api -> read_file -> delete_file
-        #   ancestors(delete_file) = {invoke_api, read_file}, uncertain = {invoke_api}
+        # Two irreversible nodes, both above threshold:
+        # max_dag_depth = 2 (path a -> c -> d)
+        # delete_record (b): ancestors={a}, uncertain={a}(EXT), depth=1
+        #   irrev_risk = (1/1) * (1/2) = 0.5 > 0.3 -> flagged
+        # delete_file (d): ancestors={a, c}, uncertain={a}(EXT), depth=2
         #   irrev_risk = (1/2) * (2/2) = 0.5 > 0.3 -> flagged
         g = _make_graph(
             {
@@ -308,9 +310,11 @@ class TestFlaggedNodes:
             [("a", "b"), ("a", "c"), ("c", "d")],
         )
         result = scorer.score(g, registry)
-        assert "b" in result.flagged_nodes
-        assert "d" in result.flagged_nodes
-        assert len(result.flagged_nodes) == 2
+        # SCORE = max(0.5, 0.5) = 0.5
+        assert result.score == pytest.approx(0.5, abs=0.01)
+        assert result.flagged_nodes == ("b", "d")
+        assert "a" not in result.flagged_nodes
+        assert "c" not in result.flagged_nodes
 
     def test_no_irreversible_ops_empty_flagged(
         self, scorer: IrreversibilityScorer, registry: OperationRegistry
@@ -329,6 +333,131 @@ class TestFlaggedNodes:
         g = _make_graph({"a": "delete_file"}, [])
         result = scorer.score(g, registry)
         assert result.flagged_nodes == ()
+
+    def test_threshold_boundary_exactly_03_not_flagged(
+        self, scorer: IrreversibilityScorer, registry: OperationRegistry
+    ) -> None:
+        """irrev_risk == 0.3 exactly should NOT be flagged (strict > check)."""
+        from workflow_eval.ontology.effect_types import EffectTarget, EffectType
+        from workflow_eval.types import OperationDefinition
+
+        custom_reg = OperationRegistry()
+        custom_reg.register(OperationDefinition(
+            name="ext_op",
+            category="test",
+            base_risk_weight=0.50,
+            effect_type=EffectType.EXTERNAL,
+            effect_targets=frozenset({EffectTarget.NETWORK}),
+        ))
+        custom_reg.register(OperationDefinition(
+            name="pure_op",
+            category="test",
+            base_risk_weight=0.0,
+            effect_type=EffectType.PURE,
+            effect_targets=frozenset(),
+        ))
+        custom_reg.register(OperationDefinition(
+            name="irrev_op",
+            category="test",
+            base_risk_weight=0.90,
+            effect_type=EffectType.IRREVERSIBLE,
+            effect_targets=frozenset({EffectTarget.DATABASE}),
+        ))
+        # Chain: ext_op -> pure_op -> pure_op -> ... -> irrev_op
+        # We need uncertain/ancestors * depth/max_depth = 0.3
+        # 10-node chain: ext_op at start, 8 pure_ops, irrev_op at end
+        # uncertain = 1, ancestors = 9, depth = 9, max_depth = 9
+        # irrev_risk = (1/9) * (9/9) = 1/9 ≈ 0.111 (too low)
+        #
+        # Try: 3 ext_ops + 7 pure_ops + 1 irrev_op = 11 nodes
+        # uncertain = 3, ancestors = 10, depth = 10/10
+        # irrev_risk = 3/10 = 0.3 exactly!
+        nodes: dict[str, str] = {}
+        for i in range(3):
+            nodes[f"e{i}"] = "ext_op"
+        for i in range(7):
+            nodes[f"p{i}"] = "pure_op"
+        nodes["irr"] = "irrev_op"
+        # Linear chain: e0 -> e1 -> e2 -> p0 -> ... -> p6 -> irr
+        node_ids = [f"e{i}" for i in range(3)] + [f"p{i}" for i in range(7)] + ["irr"]
+        edges = [(node_ids[i], node_ids[i + 1]) for i in range(len(node_ids) - 1)]
+        g = _make_graph(nodes, edges)
+        result = scorer.score(g, custom_reg)
+        # irrev_risk = (3/10) * (10/10) = 0.3 exactly -> NOT flagged (strict >)
+        assert result.score == pytest.approx(0.3, abs=1e-6)
+        assert "irr" not in result.flagged_nodes
+
+
+# ---------------------------------------------------------------------------
+# Max aggregation across multiple irreversible nodes
+# ---------------------------------------------------------------------------
+
+
+class TestMaxAggregation:
+    def test_max_picks_highest_irrev_risk(
+        self, scorer: IrreversibilityScorer, registry: OperationRegistry
+    ) -> None:
+        # Two irreversible nodes with different irrev_risk values.
+        # invoke_api -> delete_record: ancestors={invoke_api}, uncertain=1/1, depth=1/2 -> 0.5
+        # invoke_api -> read_file -> read_database -> delete_file:
+        #   ancestors={invoke_api, read_file, read_database}, uncertain=1/3, depth=3/3 -> 0.333
+        # Wait, max_dag_depth depends on longest path in full DAG.
+        #
+        # Graph: a(invoke_api) -> b(delete_record)
+        #         a -> c(read_file) -> d(read_database) -> e(delete_file)
+        # Longest path = a->c->d->e = 3 edges. max_dag_depth = 3.
+        # delete_record (b): ancestors={a}, uncertain={a}, depth=1
+        #   irrev_risk = (1/1) * (1/3) = 0.333
+        # delete_file (e): ancestors={a,c,d}, uncertain={a}, depth=3
+        #   irrev_risk = (1/3) * (3/3) = 0.333
+        # Hmm, same again. Let me use a different topology.
+        #
+        # Graph: a(invoke_api) -> b(invoke_api) -> c(delete_record)
+        #         a -> d(delete_file)
+        # Longest path = a->b->c = 2 edges. max_dag_depth = 2.
+        # delete_record (c): ancestors={a,b}, uncertain={a(EXT),b(EXT)}=2
+        #   irrev_risk = (2/2) * (2/2) = 1.0
+        # delete_file (d): ancestors={a}, uncertain={a}=1
+        #   irrev_risk = (1/1) * (1/2) = 0.5
+        # SCORE = max(1.0, 0.5) = 1.0
+        g = _make_graph(
+            {
+                "a": "invoke_api",
+                "b": "invoke_api",
+                "c": "delete_record",
+                "d": "delete_file",
+            },
+            [("a", "b"), ("b", "c"), ("a", "d")],
+        )
+        result = scorer.score(g, registry)
+        assert result.score == pytest.approx(1.0, abs=0.01)
+        # Both flagged (1.0 > 0.3 and 0.5 > 0.3)
+        assert "c" in result.flagged_nodes
+        assert "d" in result.flagged_nodes
+        # Verify individual risks in details
+        assert result.details["irrev_risks"]["c"] == pytest.approx(1.0, abs=0.01)
+        assert result.details["irrev_risks"]["d"] == pytest.approx(0.5, abs=0.01)
+
+
+# ---------------------------------------------------------------------------
+# Edge case: max_dag_depth == 0 guard
+# ---------------------------------------------------------------------------
+
+
+class TestMaxDagDepthZero:
+    def test_disconnected_irreversible_nodes_score_zero(
+        self, scorer: IrreversibilityScorer, registry: OperationRegistry
+    ) -> None:
+        # 2 disconnected irreversible nodes: no edges -> all depths = 0, max_dag_depth = 0
+        # Hits the max_dag_depth == 0 early return
+        g = _make_graph(
+            {"a": "delete_file", "b": "delete_record"},
+            [],
+        )
+        result = scorer.score(g, registry)
+        assert result.score == 0.0
+        assert result.flagged_nodes == ()
+        assert result.details["irrev_risks"] == {}
 
 
 # ---------------------------------------------------------------------------
