@@ -7,6 +7,8 @@ NOD-20 spec (Linear):
     uncertain_ancestors(i) = {a in ancestors(i) : effect_type(a) in {external, stateful}}
     irrev_risk(i) = (|uncertain_ancestors(i)| / max(|ancestors(i)|, 1)) * (depth(i) / max_dag_depth)
     SCORE = max(irrev_risk(i) for i in irreversible_nodes) or 0.0
+- depth_ratio normalizes by max depth of irreversible nodes (not max DAG depth)
+  to prevent trailing pure ops from diluting the score.
 - Clamped to [0, 1]. No irreversible ops scores 0.
 
 AC:
@@ -69,9 +71,12 @@ class IrreversibilityScorer:
             return SubScore(name=self.name, score=0.0, weight=0.0, details={"irrev_risks": {}})
 
         node_depths = _compute_node_depths(dag)
-        max_dag_depth = max(node_depths.values()) if node_depths else 0
 
-        if max_dag_depth == 0:
+        # Normalize by deepest irreversible node, not deepest node overall.
+        # This prevents trailing pure ops from diluting the score.
+        max_irrev_depth = max(node_depths[nid] for nid in irrev_nodes)
+
+        if max_irrev_depth == 0:
             return SubScore(name=self.name, score=0.0, weight=0.0, details={"irrev_risks": {}})
 
         # Per-node irrev_risk
@@ -83,7 +88,7 @@ class IrreversibilityScorer:
                 if registry.get(dag.nodes[a]["operation"]).effect_type in _UNCERTAIN_TYPES
             }
             uncertainty_ratio = len(uncertain) / max(len(ancestors), 1)
-            depth_ratio = node_depths[nid] / max_dag_depth
+            depth_ratio = node_depths[nid] / max_irrev_depth
             irrev_risks[nid] = uncertainty_ratio * depth_ratio
 
         score_val = max(irrev_risks.values()) if irrev_risks else 0.0

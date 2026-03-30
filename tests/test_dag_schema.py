@@ -35,8 +35,8 @@ class TestExampleFiles:
         dag = load_workflow(EXAMPLES_DIR / "risky_delete_cascade.yaml")
         assert isinstance(dag, WorkflowDAG)
         assert dag.name == "risky-delete-cascade"
-        assert len(dag.nodes) == 6
-        assert len(dag.edges) == 7
+        assert len(dag.nodes) == 7
+        assert len(dag.edges) == 8
 
     def test_moderate_api_chain_json(self) -> None:
         dag = load_workflow(EXAMPLES_DIR / "moderate_api_chain.json")
@@ -53,8 +53,8 @@ class TestExampleFiles:
     def test_params_preserved(self) -> None:
         dag = load_workflow(EXAMPLES_DIR / "risky_delete_cascade.yaml")
         nodes = {n.id: n for n in dag.nodes}
-        assert nodes["auth"].params == {"method": "jwt"}
-        assert nodes["lookup"].params == {"table": "users"}
+        assert nodes["call_api"].params == {"endpoint": "/users"}
+        assert nodes["del_records"].params == {"table": "users"}
 
     def test_metadata_preserved(self) -> None:
         dag = load_workflow(EXAMPLES_DIR / "safe_read_pipeline.yaml")

@@ -185,7 +185,7 @@ class TestDeepChain:
         # read_file(PURE) -> read_database(PURE) -> invoke_api(EXTERNAL) -> branch(PURE) -> delete_record(IRREVERSIBLE)
         # ancestors(delete_record) = {read_file, read_database, invoke_api, branch} = 4
         # uncertain = {invoke_api} = 1
-        # depth(delete_record) = 4 edges, max_dag_depth = 4 edges
+        # depth(delete_record) = 4 edges, max_irrev_depth = 4 edges
         # irrev_risk = (1/4) * (4/4) = 0.25
         g = _make_graph(
             {
@@ -221,28 +221,49 @@ class TestDeepChain:
         assert shallow_result.score > deep_result.score
         assert deep_result.score == pytest.approx(1 / 3, abs=0.01)
 
-    def test_deeper_position_increases_score(
+    def test_trailing_pure_ops_do_not_dilute_score(
         self, scorer: IrreversibilityScorer, registry: OperationRegistry
     ) -> None:
-        # Same chain structure but delete_record at different positions.
-        # Chain: invoke_api -> delete_record -> read_file -> read_database
-        #   delete_record depth = 1, max = 3, uncertain = 1/1
-        #   irrev_risk = (1/1) * (1/3) = 0.333
-        shallow_irrev = _make_graph(
+        # invoke_api -> delete_record (no trailing ops)
+        #   depth=1, max_irrev_depth=1, depth_ratio=1.0, uncertain=1/1=1.0
+        #   irrev_risk = 1.0
+        no_trailing = _make_graph(
+            {"a": "invoke_api", "b": "delete_record"},
+            [("a", "b")],
+        )
+        # invoke_api -> delete_record -> read_file -> read_database
+        #   depth=1, max_irrev_depth=1, depth_ratio=1.0, uncertain=1/1=1.0
+        #   irrev_risk = 1.0 (trailing reads don't affect score)
+        with_trailing = _make_graph(
             {"a": "invoke_api", "b": "delete_record", "c": "read_file", "d": "read_database"},
             [("a", "b"), ("b", "c"), ("c", "d")],
         )
-        # Chain: invoke_api -> read_file -> read_database -> delete_record
-        #   delete_record depth = 3, max = 3, uncertain = 1/3
-        #   irrev_risk = (1/3) * (3/3) = 0.333
-        deep_irrev = _make_graph(
+        no_trail = scorer.score(no_trailing, registry)
+        with_trail = scorer.score(with_trailing, registry)
+        assert no_trail.score == pytest.approx(1.0, abs=0.01)
+        assert with_trail.score == pytest.approx(1.0, abs=0.01)
+
+    def test_pure_ancestors_dilute_uncertainty_not_depth(
+        self, scorer: IrreversibilityScorer, registry: OperationRegistry
+    ) -> None:
+        # Shallow: invoke_api -> delete_record -> read -> read
+        #   uncertain=1/1=1.0, depth_ratio=1.0, irrev_risk=1.0
+        shallow = _make_graph(
+            {"a": "invoke_api", "b": "delete_record", "c": "read_file", "d": "read_database"},
+            [("a", "b"), ("b", "c"), ("c", "d")],
+        )
+        # Deep: invoke_api -> read_file -> read_database -> delete_record
+        #   uncertain=1/3=0.333, depth_ratio=1.0, irrev_risk=0.333
+        deep = _make_graph(
             {"a": "invoke_api", "b": "read_file", "c": "read_database", "d": "delete_record"},
             [("a", "b"), ("b", "c"), ("c", "d")],
         )
-        shallow_result = scorer.score(shallow_irrev, registry)
-        deep_result = scorer.score(deep_irrev, registry)
-        # Same score in this case — uncertainty ratio and depth trade off
-        assert shallow_result.score == pytest.approx(deep_result.score, abs=0.01)
+        shallow_result = scorer.score(shallow, registry)
+        deep_result = scorer.score(deep, registry)
+        # Shallow scores higher: 100% uncertain ancestors vs 33%
+        assert shallow_result.score == pytest.approx(1.0, abs=0.01)
+        assert deep_result.score == pytest.approx(1 / 3, abs=0.01)
+        assert shallow_result.score > deep_result.score
 
 
 # ---------------------------------------------------------------------------
