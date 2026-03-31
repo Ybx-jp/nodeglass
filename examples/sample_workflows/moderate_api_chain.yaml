@@ -1,0 +1,31 @@
+name: moderate-api-chain
+metadata:
+  description: "Database read, mutate, API call, write back. Expected risk: medium."
+  version: 1
+
+nodes:
+  - id: read_db
+    operation: read_database
+    params:
+      table: orders
+  - id: mutate
+    operation: mutate_state
+  - id: call_api
+    operation: invoke_api
+    params:
+      endpoint: /process
+  - id: write_db
+    operation: write_database
+    params:
+      table: results
+
+edges:
+  - source_id: read_db
+    target_id: mutate
+    edge_type: data_flow
+  - source_id: mutate
+    target_id: call_api
+    edge_type: data_flow
+  - source_id: call_api
+    target_id: write_db
+    edge_type: data_flow

@@ -1,42 +1,44 @@
 name: risky-delete-cascade
 metadata:
-  description: "Auth then fan out to parallel deletes, join to notify. Expected risk: high or critical."
-  version: 1
+  description: "API call chains through stateful mutation to fan-out deletes. Expected risk: high or critical."
+  version: 2
 
 nodes:
-  - id: auth
-    operation: authenticate
+  - id: call_api
+    operation: invoke_api
     params:
-      method: jwt
-  - id: lookup
-    operation: read_database
+      endpoint: /users
+  - id: mutate
+    operation: mutate_state
+  - id: exec
+    operation: execute_code
     params:
-      table: users
-  - id: delete_records
+      script: cleanup.sh
+  - id: del_records
     operation: delete_record
     params:
       table: users
-  - id: delete_posts
-    operation: delete_record
-    params:
-      table: posts
-  - id: delete_files
+  - id: del_files
     operation: delete_file
+  - id: destroy
+    operation: destroy_resource
   - id: notify
     operation: send_notification
 
 edges:
-  - source_id: auth
-    target_id: lookup
-  - source_id: lookup
-    target_id: delete_records
-  - source_id: lookup
-    target_id: delete_posts
-  - source_id: lookup
-    target_id: delete_files
-  - source_id: delete_records
+  - source_id: call_api
+    target_id: mutate
+  - source_id: mutate
+    target_id: exec
+  - source_id: exec
+    target_id: del_records
+  - source_id: exec
+    target_id: del_files
+  - source_id: exec
+    target_id: destroy
+  - source_id: del_records
     target_id: notify
-  - source_id: delete_posts
+  - source_id: del_files
     target_id: notify
-  - source_id: delete_files
+  - source_id: destroy
     target_id: notify
