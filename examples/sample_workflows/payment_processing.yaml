@@ -1,0 +1,64 @@
+name: payment-processing
+metadata:
+  description: >
+    E-commerce checkout flow: authenticate merchant, create a payment
+    session, run external fraud scoring, charge the card (irreversible,
+    risk=0.95), then fan out to inventory reservation, ledger update,
+    and merchant notification. Reservation feeds into invoice generation
+    and receipt email. Deep side-effect chain with the system's
+    highest-risk operation at the center.
+  version: 1
+  expected_risk: high
+  custom_registry: true
+
+nodes:
+  - id: auth
+    operation: authenticate
+    params: { method: api_key, scope: payments }
+  - id: create_session
+    operation: mutate_state
+    params: { action: initialize_payment_session }
+  - id: fraud_check
+    operation: invoke_api
+    params: { endpoint: /fraud/score, method: POST }
+  - id: charge
+    operation: charge_payment
+    params: { gateway: stripe, currency: usd }
+  - id: reserve_inventory
+    operation: write_database
+    params: { table: inventory_holds }
+  - id: update_ledger
+    operation: write_database
+    params: { table: transactions }
+  - id: notify_merchant
+    operation: send_notification
+    params: { channel: payments }
+  - id: generate_invoice
+    operation: execute_code
+    params: { action: render_invoice_pdf }
+  - id: receipt
+    operation: send_email
+    params: { template: payment_receipt, to: customer }
+  - id: webhook_fulfillment
+    operation: send_webhook
+    params: { endpoint: /fulfillment/start }
+
+edges:
+  - source_id: auth
+    target_id: create_session
+  - source_id: create_session
+    target_id: fraud_check
+  - source_id: fraud_check
+    target_id: charge
+  - source_id: charge
+    target_id: reserve_inventory
+  - source_id: charge
+    target_id: update_ledger
+  - source_id: charge
+    target_id: notify_merchant
+  - source_id: reserve_inventory
+    target_id: generate_invoice
+  - source_id: generate_invoice
+    target_id: receipt
+  - source_id: update_ledger
+    target_id: webhook_fulfillment

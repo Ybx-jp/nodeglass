@@ -1,0 +1,47 @@
+name: rag-knowledge-pipeline
+metadata:
+  description: >
+    Retrieval-augmented generation: load documents, chunk text, compute
+    embeddings, store in vector DB, then query for relevant context,
+    format a response, and cache the result. Almost entirely pure/stateful
+    — the riskiest step is the vector store write.
+  version: 1
+  expected_risk: low
+  custom_registry: true
+
+nodes:
+  - id: load_docs
+    operation: read_file
+    params: { path: /data/corpus/*.md }
+  - id: chunk_text
+    operation: mutate_state
+    params: { action: split_into_chunks, chunk_size: 512 }
+  - id: embed
+    operation: embed_text
+    params: { model: text-embedding-3-small }
+  - id: store_vectors
+    operation: vector_store_write
+    params: { collection: knowledge_base }
+  - id: query
+    operation: vector_store_query
+    params: { top_k: 5, similarity: cosine }
+  - id: format_response
+    operation: mutate_state
+    params: { action: build_prompt_with_context }
+  - id: save_cache
+    operation: write_file
+    params: { path: /cache/rag_response.json }
+
+edges:
+  - source_id: load_docs
+    target_id: chunk_text
+  - source_id: chunk_text
+    target_id: embed
+  - source_id: embed
+    target_id: store_vectors
+  - source_id: store_vectors
+    target_id: query
+  - source_id: query
+    target_id: format_response
+  - source_id: format_response
+    target_id: save_cache

@@ -1,0 +1,51 @@
+name: user-onboarding-flow
+metadata:
+  description: >
+    New-user signup: authenticate, validate input, check credentials,
+    provision account resources, persist profile, set permissions, then
+    fan out to a welcome email (irreversible) and an internal team
+    notification. The email is the only irreversible step.
+  version: 1
+  expected_risk: medium
+
+nodes:
+  - id: auth
+    operation: authenticate
+    params: { method: oauth, provider: google }
+  - id: validate_info
+    operation: validate_input
+    params: { schema: user_profile_v1 }
+  - id: check_creds
+    operation: read_credentials
+    params: { scope: account_create }
+  - id: create_account
+    operation: create_resource
+    params: { type: user_account }
+  - id: save_profile
+    operation: write_database
+    params: { table: users }
+  - id: setup_perms
+    operation: authorize
+    params: { role: member }
+  - id: welcome_email
+    operation: send_email
+    params: { template: welcome, to: new_user }
+  - id: notify_team
+    operation: send_notification
+    params: { channel: user-signups }
+
+edges:
+  - source_id: auth
+    target_id: validate_info
+  - source_id: validate_info
+    target_id: check_creds
+  - source_id: check_creds
+    target_id: create_account
+  - source_id: create_account
+    target_id: save_profile
+  - source_id: save_profile
+    target_id: setup_perms
+  - source_id: setup_perms
+    target_id: welcome_email
+  - source_id: setup_perms
+    target_id: notify_team

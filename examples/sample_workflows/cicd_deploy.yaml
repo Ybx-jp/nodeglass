@@ -1,0 +1,65 @@
+name: cicd-deploy-pipeline
+metadata:
+  description: >
+    Build-test-deploy pipeline: fetch source from remote, run parallel
+    build and security scan, gate on both, provision infrastructure,
+    deploy application code, run a database migration (irreversible DDL),
+    health-check, then notify. Deep side-effect chain through the deploy
+    path with an irreversible migration at the end.
+  version: 1
+  expected_risk: high
+  custom_registry: true
+
+nodes:
+  - id: fetch_source
+    operation: invoke_api
+    params: { endpoint: /git/fetch, ref: main }
+  - id: build
+    operation: execute_code
+    params: { action: npm_build, sandbox: true }
+  - id: test
+    operation: execute_code
+    params: { action: pytest, sandbox: true }
+  - id: scan_security
+    operation: execute_code
+    params: { action: snyk_scan }
+  - id: provision
+    operation: provision_infrastructure
+    params: { provider: aws, stack: ecs-fargate }
+  - id: deploy
+    operation: execute_code
+    params: { action: deploy_to_ecs, sandbox: false }
+  - id: migrate_db
+    operation: run_migration
+    params: { file: migrations/0042_add_index.sql, target: production }
+  - id: healthcheck
+    operation: invoke_api
+    params: { endpoint: /healthz, retries: 3 }
+  - id: record_deploy
+    operation: write_database
+    params: { table: deployment_log }
+  - id: notify
+    operation: send_notification
+    params: { channel: deploys }
+
+edges:
+  - source_id: fetch_source
+    target_id: build
+  - source_id: build
+    target_id: test
+  - source_id: build
+    target_id: scan_security
+  - source_id: test
+    target_id: provision
+  - source_id: scan_security
+    target_id: provision
+  - source_id: provision
+    target_id: deploy
+  - source_id: deploy
+    target_id: migrate_db
+  - source_id: migrate_db
+    target_id: healthcheck
+  - source_id: healthcheck
+    target_id: record_deploy
+  - source_id: record_deploy
+    target_id: notify

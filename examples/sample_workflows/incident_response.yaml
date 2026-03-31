@@ -1,0 +1,59 @@
+name: incident-response-automation
+metadata:
+  description: >
+    Automated incident response: external alert webhook triggers severity
+    assessment via diagnostic code, then forks — page oncall immediately
+    (irreversible email) while starting remediation. Remediation chain:
+    quarantine affected pods, run diagnostics, roll back the deployment,
+    verify health, write postmortem, update the status page. Every node
+    is a side-effect operation.
+  version: 1
+  expected_risk: high
+  custom_registry: true
+
+nodes:
+  - id: alert_trigger
+    operation: invoke_api
+    params: { source: pagerduty_webhook }
+  - id: assess_severity
+    operation: execute_code
+    params: { action: run_severity_classifier }
+  - id: page_oncall
+    operation: send_email
+    params: { to: oncall@company.com, priority: critical }
+  - id: isolate
+    operation: quarantine_resource
+    params: { action: network_isolate, scope: affected_pods }
+  - id: diagnose
+    operation: execute_code
+    params: { action: run_diagnostic_suite }
+  - id: remediate
+    operation: rollback_deployment
+    params: { strategy: last_known_good }
+  - id: verify
+    operation: invoke_api
+    params: { endpoint: /healthz, retries: 5 }
+  - id: postmortem
+    operation: write_database
+    params: { table: incident_log }
+  - id: update_status
+    operation: send_notification
+    params: { channel: status-page }
+
+edges:
+  - source_id: alert_trigger
+    target_id: assess_severity
+  - source_id: assess_severity
+    target_id: page_oncall
+  - source_id: assess_severity
+    target_id: isolate
+  - source_id: isolate
+    target_id: diagnose
+  - source_id: diagnose
+    target_id: remediate
+  - source_id: remediate
+    target_id: verify
+  - source_id: verify
+    target_id: postmortem
+  - source_id: postmortem
+    target_id: update_status

@@ -1,0 +1,60 @@
+name: social-media-content-bot
+metadata:
+  description: >
+    Autonomous content pipeline: search trending topics, scrape source
+    material, classify for relevance, generate post content via code
+    execution, then branch to post on two platforms simultaneously
+    (irreversible public posts). Both converge at engagement tracking
+    and a stats notification. Web content flows through code generation
+    into irreversible public actions.
+  version: 1
+  expected_risk: medium
+  custom_registry: true
+
+nodes:
+  - id: monitor_trends
+    operation: web_search
+    params: { scope: trending, platforms: [twitter, reddit] }
+  - id: scrape_content
+    operation: scrape_url
+    params: { max_pages: 10, timeout: 30 }
+  - id: analyze
+    operation: classify_content
+    params: { model: topic-relevance-v2, threshold: 0.7 }
+  - id: generate
+    operation: execute_code
+    params: { action: generate_post_content, model: claude }
+  - id: review_gate
+    operation: branch
+  - id: post_twitter
+    operation: post_social_media
+    params: { platform: twitter, max_length: 280 }
+  - id: post_linkedin
+    operation: post_social_media
+    params: { platform: linkedin, format: article }
+  - id: track_metrics
+    operation: write_database
+    params: { table: engagement_metrics }
+  - id: report_stats
+    operation: send_notification
+    params: { channel: social-metrics }
+
+edges:
+  - source_id: monitor_trends
+    target_id: scrape_content
+  - source_id: scrape_content
+    target_id: analyze
+  - source_id: analyze
+    target_id: generate
+  - source_id: generate
+    target_id: review_gate
+  - source_id: review_gate
+    target_id: post_twitter
+  - source_id: review_gate
+    target_id: post_linkedin
+  - source_id: post_twitter
+    target_id: track_metrics
+  - source_id: post_linkedin
+    target_id: track_metrics
+  - source_id: track_metrics
+    target_id: report_stats

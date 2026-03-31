@@ -1,0 +1,114 @@
+name: research-assistant-pipeline
+metadata:
+  description: >
+    AI research assistant: authenticate, gather info from web + internal sources,
+    process and merge findings, update internal systems, notify stakeholders.
+    Demonstrates information contamination propagation from web search through
+    internal write operations.
+  version: 1
+  expected_risk: medium
+
+nodes:
+  # --- Phase 1: Setup (trusted, low risk) ---
+  - id: auth
+    operation: authenticate
+    params: { method: oauth }
+  - id: read_creds
+    operation: read_credentials
+    params: { scope: database_write }
+  - id: read_config
+    operation: read_file
+    params: { path: task_config.yaml }
+  - id: read_context
+    operation: read_database
+    params: { table: prior_research }
+
+  # --- Phase 2: Research (contamination zone) ---
+  - id: make_plan
+    operation: mutate_state
+    params: { action: build_research_plan }
+  - id: execute_plan
+    operation: branch
+  - id: web_search
+    operation: invoke_api
+    params: { endpoint: /api/papers/search, method: GET }
+  - id: code_search
+    operation: read_file
+    params: { pattern: "src/**/*.py" }
+  - id: crawl_db
+    operation: read_database
+    params: { table: internal_docs, max_rows: 500 }
+  - id: combine_context
+    operation: mutate_state
+    params: { action: merge_research_streams }
+  - id: synthesize_context
+    operation: execute_code
+    params: { action: synthesize_findings }
+
+  # --- Phase 3: Write-back (contaminated data hits internal systems) ---
+  - id: save_summary
+    operation: write_file
+    params: { path: research_output.md }
+  - id: update_records
+    operation: write_database
+    params: { table: knowledge_base }
+  - id: create_ticket
+    operation: invoke_api
+    params: { endpoint: /api/tickets, method: POST }
+
+  # --- Phase 4: Notification (irreversible) ---
+  - id: notify_team
+    operation: send_notification
+    params: { channel: research-updates }
+  - id: email_stakeholder
+    operation: send_email
+    params: { to: stakeholder@company.com, subject: research_complete }
+
+edges:
+  # Setup chain
+  - source_id: auth
+    target_id: read_creds
+  - source_id: read_creds
+    target_id: read_config
+  - source_id: read_config
+    target_id: read_context
+
+  # Research: plan then branch to 3 parallel research streams
+  - source_id: read_context
+    target_id: make_plan
+  - source_id: make_plan
+    target_id: execute_plan
+  - source_id: execute_plan
+    target_id: web_search
+  - source_id: execute_plan
+    target_id: code_search
+  - source_id: execute_plan
+    target_id: crawl_db
+
+  # All 3 streams converge at merge point
+  - source_id: web_search
+    target_id: combine_context
+  - source_id: code_search
+    target_id: combine_context
+  - source_id: crawl_db
+    target_id: combine_context
+
+  # Merge -> synthesize -> fan out to 3 write targets
+  - source_id: combine_context
+    target_id: synthesize_context
+  - source_id: synthesize_context
+    target_id: save_summary
+  - source_id: synthesize_context
+    target_id: update_records
+  - source_id: synthesize_context
+    target_id: create_ticket
+
+  # Write-back converges to notification
+  - source_id: save_summary
+    target_id: notify_team
+  - source_id: update_records
+    target_id: notify_team
+  - source_id: create_ticket
+    target_id: notify_team
+  - source_id: notify_team
+    target_id: email_stakeholder

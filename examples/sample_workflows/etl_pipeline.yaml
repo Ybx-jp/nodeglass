@@ -1,0 +1,40 @@
+name: etl-data-pipeline
+metadata:
+  description: >
+    Classic extract-transform-load: pull CSV exports and database rows,
+    validate schema compliance, transform to canonical format, load into
+    the data warehouse, then verify row counts. No irreversible ops.
+  version: 1
+  expected_risk: low
+
+nodes:
+  - id: extract_csv
+    operation: read_file
+    params: { path: /incoming/export.csv }
+  - id: extract_db
+    operation: read_database
+    params: { table: source_events, since: last_watermark }
+  - id: validate
+    operation: validate_input
+    params: { schema: canonical_v2 }
+  - id: transform
+    operation: mutate_state
+    params: { action: normalize_and_dedupe }
+  - id: load_warehouse
+    operation: write_database
+    params: { table: analytics.events }
+  - id: verify_load
+    operation: read_database
+    params: { query: "SELECT count(*) FROM analytics.events" }
+
+edges:
+  - source_id: extract_csv
+    target_id: validate
+  - source_id: extract_db
+    target_id: validate
+  - source_id: validate
+    target_id: transform
+  - source_id: transform
+    target_id: load_warehouse
+  - source_id: load_warehouse
+    target_id: verify_load
