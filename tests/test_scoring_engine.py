@@ -13,7 +13,7 @@ import pytest
 
 from workflow_eval.ontology.defaults import get_default_registry
 from workflow_eval.ontology.registry import OperationRegistry
-from workflow_eval.scoring.aggregator import aggregate, classify_risk
+from workflow_eval.scoring.aggregator import aggregate, apply_weights, classify_risk
 from workflow_eval.scoring.engine import RiskScoringEngine
 from workflow_eval.types import (
     RiskLevel,
@@ -129,6 +129,8 @@ class TestEngineReturnsProfile:
         result = engine.score(g)
         expected = sum(s.weight * s.score for s in result.sub_scores)
         assert result.aggregate_score == pytest.approx(expected, abs=1e-6)
+        # Pin absolute value to guard against uniform weight bugs
+        assert result.aggregate_score == pytest.approx(0.0609, abs=0.005)
 
     def test_low_risk_chain_aggregate(
         self, engine: RiskScoringEngine,
@@ -277,7 +279,7 @@ class TestChokepoints:
             [("a", "c"), ("b", "c"), ("c", "d"), ("c", "e")],
         )
         result = engine.score(g)
-        assert "c" in result.chokepoints
+        assert result.chokepoints == ("c",)
 
     def test_low_risk_center_not_chokepoint(
         self, engine: RiskScoringEngine,
@@ -352,3 +354,81 @@ class TestAggregator:
                        "centrality", "spectral", "compositional"]
         )
         assert aggregate(scores, ScoringConfig()) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Coverage gaps from review
+# ---------------------------------------------------------------------------
+
+
+class TestCoverageGaps:
+    def test_weight_tolerance_boundary_accepted(self) -> None:
+        # Spec says tolerance 0.001 — weights summing to 1.0005 should be accepted
+        config = ScoringConfig(
+            fan_out=0.15, chain_depth=0.20, irreversibility=0.2505,
+            centrality=0.15, spectral=0.10, compositional=0.15,
+        )
+        assert config.irreversibility == 0.2505
+
+    def test_weight_tolerance_boundary_rejected(self) -> None:
+        # Weights summing to 1.002 (just beyond 0.001 tolerance) should be rejected
+        with pytest.raises(ValueError, match="must sum to 1.0"):
+            ScoringConfig(
+                fan_out=0.15, chain_depth=0.202, irreversibility=0.25,
+                centrality=0.15, spectral=0.10, compositional=0.15,
+            )
+
+    def test_chokepoint_at_exact_threshold(
+        self, engine: RiskScoringEngine,
+    ) -> None:
+        # mutate_state (risk=0.25) at bow-tie center: exactly at _CHOKEPOINT_RISK_THRESHOLD
+        # >= 0.25 means it should be included
+        g = _make_graph(
+            {"a": "read_file", "b": "read_file", "c": "mutate_state",
+             "d": "read_file", "e": "read_file"},
+            [("a", "c"), ("b", "c"), ("c", "d"), ("c", "e")],
+        )
+        result = engine.score(g)
+        assert "c" in result.chokepoints
+
+    def test_negative_weight_rejected(self) -> None:
+        # Individual weights must be >= 0.0
+        with pytest.raises(ValueError):
+            ScoringConfig(
+                fan_out=-0.5, chain_depth=0.65, irreversibility=0.25,
+                centrality=0.15, spectral=0.10, compositional=0.35,
+            )
+
+    def test_apply_weights_direct(self) -> None:
+        scores = (
+            SubScore(name="fan_out", score=0.5, weight=0.0),
+            SubScore(name="chain_depth", score=0.8, weight=0.0),
+            SubScore(name="irreversibility", score=0.3, weight=0.0),
+            SubScore(name="centrality", score=0.1, weight=0.0),
+            SubScore(name="spectral", score=0.6, weight=0.0),
+            SubScore(name="compositional", score=0.2, weight=0.0),
+        )
+        config = ScoringConfig()
+        result = apply_weights(scores, config)
+        weight_map = {s.name: s for s in result}
+        # Weights populated from config
+        assert weight_map["fan_out"].weight == 0.15
+        assert weight_map["chain_depth"].weight == 0.20
+        assert weight_map["irreversibility"].weight == 0.25
+        assert weight_map["centrality"].weight == 0.15
+        assert weight_map["spectral"].weight == 0.10
+        assert weight_map["compositional"].weight == 0.15
+        # Scores unchanged
+        assert weight_map["fan_out"].score == 0.5
+        assert weight_map["chain_depth"].score == 0.8
+
+    def test_cyclic_graph_raises(
+        self, engine: RiskScoringEngine,
+    ) -> None:
+        # Engine assumes valid DAG — cycles cause NetworkXUnfeasible from topological_sort
+        g = _make_graph(
+            {"a": "read_file", "b": "read_file"},
+            [("a", "b"), ("b", "a")],
+        )
+        with pytest.raises(nx.NetworkXUnfeasible):
+            engine.score(g)

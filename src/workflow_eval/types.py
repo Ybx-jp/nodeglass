@@ -115,12 +115,12 @@ class ScoringConfig(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    fan_out: float = 0.15
-    chain_depth: float = 0.20
-    irreversibility: float = 0.25
-    centrality: float = 0.15
-    spectral: float = 0.10
-    compositional: float = 0.15
+    fan_out: float = Field(default=0.15, ge=0.0)
+    chain_depth: float = Field(default=0.20, ge=0.0)
+    irreversibility: float = Field(default=0.25, ge=0.0)
+    centrality: float = Field(default=0.15, ge=0.0)
+    spectral: float = Field(default=0.10, ge=0.0)
+    compositional: float = Field(default=0.15, ge=0.0)
 
     @model_validator(mode="after")
     def _weights_sum_to_one(self) -> ScoringConfig:
@@ -128,7 +128,7 @@ class ScoringConfig(BaseModel):
             self.fan_out + self.chain_depth + self.irreversibility
             + self.centrality + self.spectral + self.compositional
         )
-        if abs(total - 1.0) > 1e-6:
+        if abs(total - 1.0) > 1e-3:
             raise ValueError(f"Scorer weights must sum to 1.0, got {total:.6f}")
         return self
 
