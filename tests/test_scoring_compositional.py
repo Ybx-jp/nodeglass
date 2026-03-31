@@ -70,7 +70,7 @@ class TestHighComposition:
         )
         high_result = scorer.score(high, registry)
         neutral_result = scorer.score(neutral, registry)
-        assert high_result.score > neutral_result.score * 2
+        assert high_result.score == pytest.approx(neutral_result.score * 2.5, abs=0.001)
 
     def test_authenticate_to_destroy_resource(
         self, scorer: CompositionalScorer, registry: OperationRegistry
@@ -114,8 +114,8 @@ class TestLowComposition:
         )
         low_result = scorer.score(low, registry)
         high_result = scorer.score(high, registry)
-        # High should be >100x greater
-        assert high_result.score > low_result.score * 100
+        # High is exactly 135x greater: 0.1125 / 0.000833 = 135.0
+        assert high_result.score == pytest.approx(low_result.score * 135, abs=0.01)
 
 
 # ---------------------------------------------------------------------------
@@ -324,6 +324,62 @@ class TestErrorHandling:
 # ---------------------------------------------------------------------------
 # Protocol compliance
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Coverage gaps from review
+# ---------------------------------------------------------------------------
+
+
+class TestCoverageGaps:
+    def test_clamp_at_one_when_edge_risk_exceeds_max(
+        self, registry: OperationRegistry,
+    ) -> None:
+        # Custom C=5.0 between two high-risk ops to exceed _MAX_EDGE_RISK=3.0
+        # destroy_resource(0.90) -> destroy_resource(0.90) * C=5.0
+        # edge_risk = 0.90 * 0.90 * 5.0 = 4.05, score = min(4.05/3.0, 1.0) = 1.0
+        custom = CompositionalScorer(
+            compositions={("destroy_resource", "destroy_resource"): 5.0},
+        )
+        g = _make_graph(
+            {"a": "destroy_resource", "b": "destroy_resource"},
+            [("a", "b")],
+        )
+        result = custom.score(g, registry)
+        assert result.score == 1.0
+        assert result.details["edge_risk"] == pytest.approx(4.05, abs=0.001)
+
+    def test_source_side_wildcard_matches(
+        self, registry: OperationRegistry,
+    ) -> None:
+        # Wildcard on the source side: "delete_*" -> invoke_api
+        # delete_file(0.80) -> invoke_api(0.30) * C=2.5
+        # edge_risk = 0.80 * 0.30 * 2.5 = 0.60, score = 0.60/3.0 = 0.20
+        custom = CompositionalScorer(
+            compositions={("delete_*", "invoke_api"): 2.5},
+        )
+        g = _make_graph(
+            {"a": "delete_file", "b": "invoke_api"},
+            [("a", "b")],
+        )
+        result = custom.score(g, registry)
+        assert result.score == pytest.approx(0.20, abs=0.001)
+        assert result.details["composition_multiplier"] == 2.5
+
+    def test_tie_breaking_first_edge_wins(
+        self, scorer: CompositionalScorer, registry: OperationRegistry,
+    ) -> None:
+        # Two edges with identical edge_risk — strict > means first encountered wins
+        # Both: read_credentials(0.45) -> invoke_api(0.30) * C=2.5 = 0.3375
+        g = _make_graph(
+            {
+                "a": "read_credentials", "b": "invoke_api",
+                "c": "read_credentials", "d": "invoke_api",
+            },
+            [("a", "b"), ("c", "d")],
+        )
+        result = scorer.score(g, registry)
+        assert result.details["highest_risk_edge"] == ("a", "b")
 
 
 class TestProtocolCompliance:
