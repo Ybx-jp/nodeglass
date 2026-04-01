@@ -1,0 +1,88 @@
+name: infrastructure-teardown
+metadata:
+  description: >
+    Full environment decommission: authenticate, enumerate resources via
+    API, stop all services, then execute a teardown playbook that fans out
+    to destroy compute, storage, and network, delete DNS records, purge
+    the resource database, and wipe log files — all in parallel. All six
+    destruction ops converge at a completion notification. The teardown
+    script at the fan-out center is a structural chokepoint: every
+    irreversible action flows through it, and every ancestor is an
+    external operation feeding uncertainty into the destruction.
+  version: 1
+  expected_risk: high
+
+nodes:
+  # --- Setup chain (all EXTERNAL) ---
+  - id: auth
+    operation: authenticate
+    params: { method: mfa, scope: admin }
+  - id: list_resources
+    operation: invoke_api
+    params: { endpoint: /api/inventory, method: GET }
+  - id: stop_services
+    operation: invoke_api
+    params: { endpoint: /api/services/stop-all, method: POST }
+  - id: exec_teardown
+    operation: execute_code
+    params: { action: run_teardown_playbook }
+
+  # --- Parallel destruction (all IRREVERSIBLE) ---
+  - id: destroy_compute
+    operation: destroy_resource
+    params: { type: ec2_instances }
+  - id: destroy_storage
+    operation: destroy_resource
+    params: { type: s3_buckets }
+  - id: destroy_network
+    operation: destroy_resource
+    params: { type: vpc_subnets }
+  - id: delete_dns
+    operation: delete_record
+    params: { table: route53_records }
+  - id: purge_db
+    operation: delete_record
+    params: { table: resource_inventory }
+  - id: purge_logs
+    operation: delete_file
+    params: { path: /var/log/staging/ }
+
+  # --- Convergence (EXTERNAL, not irreversible) ---
+  - id: notify_complete
+    operation: send_notification
+    params: { channel: platform-team, template: teardown_complete }
+
+edges:
+  # Linear external chain
+  - source_id: auth
+    target_id: list_resources
+  - source_id: list_resources
+    target_id: stop_services
+  - source_id: stop_services
+    target_id: exec_teardown
+  # 6-way fan-out to parallel destruction
+  - source_id: exec_teardown
+    target_id: destroy_compute
+  - source_id: exec_teardown
+    target_id: destroy_storage
+  - source_id: exec_teardown
+    target_id: destroy_network
+  - source_id: exec_teardown
+    target_id: delete_dns
+  - source_id: exec_teardown
+    target_id: purge_db
+  - source_id: exec_teardown
+    target_id: purge_logs
+  # All 6 converge at notification
+  - source_id: destroy_compute
+    target_id: notify_complete
+  - source_id: destroy_storage
+    target_id: notify_complete
+  - source_id: destroy_network
+    target_id: notify_complete
+  - source_id: delete_dns
+    target_id: notify_complete
+  - source_id: purge_db
+    target_id: notify_complete
+  - source_id: purge_logs
+    target_id: notify_complete

@@ -1,0 +1,59 @@
+name: database-migration
+metadata:
+  description: >
+    Production database migration: authenticate with MFA, create a cloud
+    snapshot via API, enable read-only mode, execute the irreversible DDL
+    migration, run a validation suite, backfill transformed rows, restore
+    write access, verify integrity via API, then notify the DBA channel.
+    The migration itself is the highest-risk node — a failed DDL on
+    production can be unrecoverable.
+  version: 1
+  expected_risk: high
+  custom_registry: true
+
+nodes:
+  - id: auth
+    operation: authenticate
+    params: { method: mfa, scope: dba }
+  - id: create_snapshot
+    operation: invoke_api
+    params: { endpoint: /rds/snapshot, method: POST }
+  - id: stop_writes
+    operation: mutate_state
+    params: { action: enable_read_only_mode }
+  - id: migrate
+    operation: run_migration
+    params: { file: migrations/0042_encrypt_pii.sql, target: production }
+  - id: validate_schema
+    operation: execute_code
+    params: { action: run_schema_validation }
+  - id: backfill
+    operation: execute_code
+    params: { action: transform_existing_rows }
+  - id: enable_writes
+    operation: mutate_state
+    params: { action: disable_read_only_mode }
+  - id: verify_integrity
+    operation: invoke_api
+    params: { endpoint: /db/healthcheck }
+  - id: notify
+    operation: send_notification
+    params: { channel: dba-alerts }
+
+edges:
+  - source_id: auth
+    target_id: create_snapshot
+  - source_id: create_snapshot
+    target_id: stop_writes
+  - source_id: stop_writes
+    target_id: migrate
+  - source_id: migrate
+    target_id: validate_schema
+  - source_id: validate_schema
+    target_id: backfill
+  - source_id: backfill
+    target_id: enable_writes
+  - source_id: enable_writes
+    target_id: verify_integrity
+  - source_id: verify_integrity
+    target_id: notify

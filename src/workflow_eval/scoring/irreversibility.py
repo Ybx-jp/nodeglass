@@ -4,7 +4,7 @@ NOD-20 spec (Linear):
 - src/workflow_eval/scoring/irreversibility.py
 - For each irreversible node i:
     ancestors(i) = all nodes on any path from a root to i
-    uncertain_ancestors(i) = {a in ancestors(i) : effect_type(a) in {external, stateful}}
+    uncertain_ancestors(i) = {a in ancestors(i) : effect_type(a) in {external, stateful, irreversible}}
     irrev_risk(i) = (|uncertain_ancestors(i)| / max(|ancestors(i)|, 1)) * (depth(i) / max_dag_depth)
     SCORE = max(irrev_risk(i) for i in irreversible_nodes) or 0.0
 - depth_ratio normalizes by max depth of irreversible nodes (not max DAG depth)
@@ -27,7 +27,7 @@ from workflow_eval.ontology.effect_types import EffectType
 from workflow_eval.ontology.registry import OperationRegistry
 from workflow_eval.types import SubScore
 
-_UNCERTAIN_TYPES = frozenset({EffectType.EXTERNAL, EffectType.STATEFUL})
+_UNCERTAIN_TYPES = frozenset({EffectType.EXTERNAL, EffectType.STATEFUL, EffectType.IRREVERSIBLE})
 _FLAGGED_THRESHOLD = 0.3
 
 

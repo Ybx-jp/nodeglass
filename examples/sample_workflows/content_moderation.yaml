@@ -1,0 +1,53 @@
+name: content-moderation-pipeline
+metadata:
+  description: >
+    User-generated content moderation: ingest post, classify with ML model,
+    check against policy rules, then branch — approved content goes to the
+    publish queue; flagged content gets quarantined. Both paths converge at
+    an audit log. The quarantine path notifies the content author.
+  version: 1
+  expected_risk: medium
+  custom_registry: true
+
+nodes:
+  - id: ingest
+    operation: ingest_user_input
+    params: { source: content_api, sanitized: false }
+  - id: classify
+    operation: classify_content
+    params: { model: moderation-v3, threshold: 0.85 }
+  - id: check_policy
+    operation: read_state
+    params: { key: content_policy_rules }
+  - id: decision
+    operation: branch
+  - id: approve
+    operation: write_database
+    params: { table: publish_queue }
+  - id: quarantine
+    operation: quarantine_resource
+    params: { action: flag_and_hide }
+  - id: notify_author
+    operation: send_notification
+    params: { channel: content-authors, template: flagged_content }
+  - id: audit_log
+    operation: write_file
+    params: { path: /var/log/moderation/decisions.jsonl }
+
+edges:
+  - source_id: ingest
+    target_id: classify
+  - source_id: classify
+    target_id: check_policy
+  - source_id: check_policy
+    target_id: decision
+  - source_id: decision
+    target_id: approve
+  - source_id: decision
+    target_id: quarantine
+  - source_id: quarantine
+    target_id: notify_author
+  - source_id: approve
+    target_id: audit_log
+  - source_id: notify_author
+    target_id: audit_log

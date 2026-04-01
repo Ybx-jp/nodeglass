@@ -1,0 +1,35 @@
+name: scheduled-report-generator
+metadata:
+  description: >
+    Nightly cron job: read from two data sources, merge into a summary,
+    write report file plus an archive copy. No external calls, no
+    irreversible ops — pure data shuffling.
+  version: 1
+  expected_risk: low
+
+nodes:
+  - id: read_orders
+    operation: read_database
+    params: { table: orders, window: 24h }
+  - id: read_inventory
+    operation: read_database
+    params: { table: inventory }
+  - id: merge_data
+    operation: mutate_state
+    params: { action: join_order_inventory }
+  - id: generate_report
+    operation: write_file
+    params: { path: /reports/daily_summary.csv }
+  - id: archive_copy
+    operation: write_file
+    params: { path: /archive/2026-03-31.csv }
+
+edges:
+  - source_id: read_orders
+    target_id: merge_data
+  - source_id: read_inventory
+    target_id: merge_data
+  - source_id: merge_data
+    target_id: generate_report
+  - source_id: merge_data
+    target_id: archive_copy

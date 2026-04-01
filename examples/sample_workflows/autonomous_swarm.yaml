@@ -1,0 +1,160 @@
+name: autonomous-agent-swarm
+metadata:
+  description: >
+    Autonomous multi-agent system processing unscrubbed user input. Spawns
+    parallel worker agents (researcher, coder, communicator) that search the web,
+    generate and deploy code, and open external ports — all coordinating through
+    shared state before taking irreversible production actions. Demonstrates
+    compounding structural risk from fan-out, deep side-effect chains, untrusted
+    input propagation, and autonomous coordination.
+  version: 1
+  expected_risk: high
+  custom_registry: true
+
+nodes:
+  # --- Phase 1: Unscrubbed ingestion ---
+  - id: ingest_input
+    operation: ingest_user_input
+    params: { source: public_api, sanitized: false }
+  - id: parse_request
+    operation: execute_code
+    params: { action: parse_user_request, sandbox: false }
+  - id: store_raw
+    operation: write_database
+    params: { table: raw_requests, validated: false }
+
+  # --- Phase 2: Agent swarm spawn ---
+  - id: spawn_coordinator
+    operation: spawn_agent
+    params: { role: orchestrator, autonomy: full }
+  - id: spawn_researcher
+    operation: spawn_agent
+    params: { role: web_researcher, autonomy: full }
+  - id: spawn_coder
+    operation: spawn_agent
+    params: { role: code_generator, autonomy: full }
+  - id: spawn_comms
+    operation: spawn_agent
+    params: { role: external_comms, autonomy: full }
+
+  # --- Phase 3a: Research branch (deep, external) ---
+  - id: search_web
+    operation: web_search
+    params: { scope: unrestricted }
+  - id: search_deep
+    operation: web_search
+    params: { scope: unrestricted, follow_links: true }
+  - id: scrape_sources
+    operation: invoke_api
+    params: { action: scrape_discovered_urls }
+  - id: cache_research
+    operation: write_file
+    params: { path: /tmp/research_cache/ }
+
+  # --- Phase 3b: Code generation branch ---
+  - id: read_codebase
+    operation: read_file
+    params: { path: src/ }
+  - id: generate_code
+    operation: execute_code
+    params: { action: generate_from_research, sandbox: false }
+  - id: test_code
+    operation: execute_code
+    params: { action: run_generated_tests }
+
+  # --- Phase 3c: External communications branch ---
+  - id: open_port
+    operation: open_port
+    params: { port: 8443, protocol: https, exposed: true }
+  - id: listen_external
+    operation: invoke_api
+    params: { action: accept_inbound_connections }
+
+  # --- Phase 4: Coordination (all contamination converges) ---
+  - id: coordinate
+    operation: coordinate_agents
+    params: { action: merge_all_agent_outputs }
+
+  # --- Phase 5: Production actions (irreversible, contaminated) ---
+  - id: deploy_code
+    operation: execute_code
+    params: { action: deploy_generated_code, target: production }
+  - id: push_to_prod
+    operation: invoke_api
+    params: { endpoint: /api/deployments, method: POST }
+  - id: send_response
+    operation: send_email
+    params: { to: original_requester, content: agent_generated }
+  - id: update_prod_db
+    operation: write_database
+    params: { table: production_records }
+  - id: destroy_temp
+    operation: destroy_resource
+    params: { target: temp_agent_infrastructure }
+
+edges:
+  # Ingestion chain (unscrubbed input flows straight through)
+  - source_id: ingest_input
+    target_id: parse_request
+  - source_id: parse_request
+    target_id: store_raw
+  - source_id: store_raw
+    target_id: spawn_coordinator
+
+  # Coordinator fans out to 3 autonomous agents
+  - source_id: spawn_coordinator
+    target_id: spawn_researcher
+  - source_id: spawn_coordinator
+    target_id: spawn_coder
+  - source_id: spawn_coordinator
+    target_id: spawn_comms
+
+  # Research branch: deep external chain
+  - source_id: spawn_researcher
+    target_id: search_web
+  - source_id: search_web
+    target_id: search_deep
+  - source_id: search_deep
+    target_id: scrape_sources
+  - source_id: scrape_sources
+    target_id: cache_research
+
+  # Coder branch: reads code, generates, tests
+  - source_id: spawn_coder
+    target_id: read_codebase
+  - source_id: read_codebase
+    target_id: generate_code
+  - source_id: generate_code
+    target_id: test_code
+
+  # Comms branch: opens port, listens for external input
+  - source_id: spawn_comms
+    target_id: open_port
+  - source_id: open_port
+    target_id: listen_external
+
+  # All branches converge at coordination point
+  - source_id: cache_research
+    target_id: coordinate
+  - source_id: test_code
+    target_id: coordinate
+  - source_id: listen_external
+    target_id: coordinate
+
+  # Coordination fans out to production actions
+  - source_id: coordinate
+    target_id: deploy_code
+  - source_id: deploy_code
+    target_id: push_to_prod
+  - source_id: coordinate
+    target_id: send_response
+  - source_id: coordinate
+    target_id: update_prod_db
+
+  # All production actions converge at cleanup (irreversible)
+  - source_id: push_to_prod
+    target_id: destroy_temp
+  - source_id: send_response
+    target_id: destroy_temp
+  - source_id: update_prod_db
+    target_id: destroy_temp
