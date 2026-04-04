@@ -162,6 +162,8 @@ class MitigationAction(StrEnum):
     REDUCE_PARALLELISM = "reduce_parallelism"
     ADD_AUDIT_LOG = "add_audit_log"
     REQUIRE_AUTHENTICATION = "require_authentication"
+    ADD_RATE_LIMIT = "add_rate_limit"
+    ADD_RETRY = "add_retry"
 
 
 class MitigationPriority(StrEnum):
