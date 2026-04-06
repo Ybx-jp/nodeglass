@@ -138,8 +138,7 @@ class TestRiskyDeleteCascade:
         ]
         # Both delete_record and delete_file are irreversible
         confirmed_nodes = {nid for m in confirmations for nid in m.target_node_ids}
-        assert "delete_posts" in confirmed_nodes
-        assert "delete_files" in confirmed_nodes
+        assert confirmed_nodes == {"delete_posts", "delete_files"}
 
     def test_has_audit_on_auth(
         self, engine: MitigationEngine, registry: OperationRegistry,
@@ -152,7 +151,7 @@ class TestRiskyDeleteCascade:
             if m.action == MitigationAction.ADD_AUDIT_LOG
         ]
         audit_nodes = {nid for m in audits for nid in m.target_node_ids}
-        assert "auth" in audit_nodes
+        assert audit_nodes == {"auth"}
 
     def test_multiple_required(
         self, engine: MitigationEngine, registry: OperationRegistry,
@@ -161,8 +160,8 @@ class TestRiskyDeleteCascade:
             _high_risk_profile(), self._cascade_dag(), registry,
         )
         required = [m for m in plan.mitigations if m.priority == MitigationPriority.REQUIRED]
-        # At minimum: add_confirmation on 2 deletes + add_audit_log on auth = 3
-        assert len(required) >= 3
+        # Exactly: add_confirmation on 2 deletes + add_audit_log on auth = 3
+        assert len(required) == 3
 
 
 # ---------------------------------------------------------------------------
@@ -209,8 +208,8 @@ class TestResidualRisk:
         engine = MitigationEngine()
         plan = engine.generate_plan(_low_risk_profile(), dag, registry)
         required = [m for m in plan.mitigations if m.priority == MitigationPriority.REQUIRED]
-        if not required:
-            assert plan.residual_risk == plan.original_risk
+        assert len(required) == 0
+        assert plan.residual_risk == plan.original_risk
 
     def test_zero_aggregate_stays_zero(
         self, engine: MitigationEngine, registry: OperationRegistry,
@@ -285,6 +284,8 @@ class TestDeduplication:
         profile = _low_risk_profile()
         plan = engine.generate_plan(profile, dag, registry)
         assert len(plan.mitigations) == 1
+        # First-wins: the surviving mitigation should have the first reason
+        assert plan.mitigations[0].reason == "test"
 
 
 # ---------------------------------------------------------------------------
@@ -402,4 +403,33 @@ class TestEdgeCases:
         assert isinstance(plan, MitigationPlan)
         assert isinstance(plan.mitigations, tuple)
         assert plan.original_risk == profile.aggregate_score
-        assert 0.0 <= plan.residual_risk <= 1.0
+        # auth(CREDENTIALS) + del(IRREVERSIBLE) → 2 required mitigations
+        # residual = 0.80 * (0.5^2) = 0.20
+        assert plan.residual_risk == pytest.approx(0.20)
+
+
+# ---------------------------------------------------------------------------
+# Coverage gaps (review fixes)
+# ---------------------------------------------------------------------------
+
+
+class TestCoverageGaps:
+    def test_unknown_op_error_propagates(
+        self, engine: MitigationEngine, registry: OperationRegistry,
+    ) -> None:
+        """Engine propagates KeyError for unknown operations."""
+        dag = nx.DiGraph()
+        dag.add_node("x", operation="nonexistent_op")
+        with pytest.raises(KeyError, match="nonexistent_op"):
+            engine.generate_plan(_high_risk_profile(), dag, registry)
+
+    def test_empty_strategies_tuple_runs_nothing(self, registry: OperationRegistry) -> None:
+        """MitigationEngine(strategies=()) should run zero strategies, not defaults."""
+        engine = MitigationEngine(strategies=())
+        dag = _build_dag(
+            nodes=[("auth", "authenticate"), ("del", "delete_record")],
+            edges=[("auth", "del")],
+        )
+        plan = engine.generate_plan(_high_risk_profile(), dag, registry)
+        assert len(plan.mitigations) == 0
+        assert plan.residual_risk == plan.original_risk

@@ -316,6 +316,7 @@ class TestCredentialStrategy:
         dag = _build_dag(nodes=[("creds", "read_credentials")], edges=[])
         result = MitigateCredentialAccess()(dag, registry, empty_profile)
         assert len(result) == 1
+        assert result[0].action == MitigationAction.ADD_AUDIT_LOG
 
 
 class TestUserFacingStrategy:
@@ -356,7 +357,7 @@ class TestUncertainPredecessorStrategy:
         result = MitigateUncertainPredecessors()(dag, registry, empty_profile)
         assert len(result) == 1
         assert result[0].action == MitigationAction.ADD_RETRY
-        assert "api" in result[0].target_node_ids
+        assert result[0].target_node_ids == ("api",)
 
     def test_stateful_predecessor_triggers(self, registry: OperationRegistry, empty_profile: RiskProfile) -> None:
         dag = _build_dag(
@@ -365,7 +366,7 @@ class TestUncertainPredecessorStrategy:
         )
         result = MitigateUncertainPredecessors()(dag, registry, empty_profile)
         assert len(result) == 1
-        assert "state" in result[0].target_node_ids
+        assert result[0].target_node_ids == ("state",)
 
     def test_pure_predecessor_no_trigger(self, registry: OperationRegistry, empty_profile: RiskProfile) -> None:
         dag = _build_dag(
@@ -429,3 +430,73 @@ class TestEmptyDAG:
         dag = nx.DiGraph()
         for strategy in get_default_strategies():
             assert strategy(dag, registry, empty_profile) == []
+
+
+# ---------------------------------------------------------------------------
+# Coverage gaps (review fixes)
+# ---------------------------------------------------------------------------
+
+
+class TestCoverageGaps:
+    def test_high_risk_external_boundary_at_exactly_half(self, empty_profile: RiskProfile) -> None:
+        """Operation with risk=0.50 and EXTERNAL should trigger (>= boundary)."""
+        registry = OperationRegistry()
+        registry.register(OperationDefinition(
+            name="boundary_external",
+            category="test",
+            base_risk_weight=0.50,
+            effect_type=EffectType.EXTERNAL,
+            effect_targets=frozenset({EffectTarget.NETWORK}),
+        ))
+        dag = _build_dag(nodes=[("b", "boundary_external")], edges=[])
+        result = MitigateHighRiskExternal()(dag, registry, empty_profile)
+        assert len(result) == 1
+        assert result[0].action == MitigationAction.ADD_RATE_LIMIT
+
+    def test_unknown_operation_raises_key_error(self, registry: OperationRegistry, empty_profile: RiskProfile) -> None:
+        """Strategies propagate KeyError for unknown operations."""
+        dag = nx.DiGraph()
+        dag.add_node("x", operation="nonexistent_op")
+        with pytest.raises(KeyError, match="nonexistent_op"):
+            MitigateIrreversibleOps()(dag, registry, empty_profile)
+
+    def test_reason_contains_node_id_and_op_name(self, registry: OperationRegistry, empty_profile: RiskProfile) -> None:
+        """Reason strings include the node ID and operation name."""
+        dag = _build_dag(nodes=[("my_node", "delete_record")], edges=[])
+        result = MitigateIrreversibleOps()(dag, registry, empty_profile)
+        for m in result:
+            assert "my_node" in m.reason
+            assert "delete_record" in m.reason
+
+    def test_multiple_irreversible_nodes_independent_predecessors(
+        self, registry: OperationRegistry, empty_profile: RiskProfile,
+    ) -> None:
+        """Two irreversible nodes each get their own uncertain-predecessor mitigation."""
+        dag = _build_dag(
+            nodes=[
+                ("api1", "invoke_api"),
+                ("del1", "delete_record"),
+                ("api2", "send_webhook"),
+                ("del2", "destroy_resource"),
+            ],
+            edges=[("api1", "del1"), ("api2", "del2")],
+        )
+        result = MitigateUncertainPredecessors()(dag, registry, empty_profile)
+        assert len(result) == 2  # one per irreversible node
+        target_sets = [set(m.target_node_ids) for m in result]
+        assert {"api1"} in target_sets
+        assert {"api2"} in target_sets
+
+    def test_external_strategy_ignores_irreversible_and_stateful(
+        self, registry: OperationRegistry, empty_profile: RiskProfile,
+    ) -> None:
+        """IRREVERSIBLE and STATEFUL ops should not trigger sandbox_external."""
+        dag = _build_dag(
+            nodes=[
+                ("del", "delete_record"),
+                ("state", "mutate_state"),
+            ],
+            edges=[],
+        )
+        result = MitigateExternalOps()(dag, registry, empty_profile)
+        assert result == []

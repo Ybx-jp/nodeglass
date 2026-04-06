@@ -47,7 +47,7 @@ class MitigationEngine:
         self,
         strategies: tuple[MitigationStrategy, ...] | None = None,
     ) -> None:
-        self._strategies = strategies or get_default_strategies()
+        self._strategies = strategies if strategies is not None else get_default_strategies()
 
     def generate_plan(
         self,

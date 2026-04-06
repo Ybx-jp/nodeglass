@@ -182,6 +182,7 @@ class TestDeduplication:
         plan = engine.generate_plan(profile, dag, registry)
         keys = [(m.action, frozenset(m.target_node_ids)) for m in plan.mitigations]
         assert len(keys) == len(set(keys))
+        assert len(plan.mitigations) == 2  # ADD_CONFIRMATION + ADD_ROLLBACK
 
 
 # ---------------------------------------------------------------------------
@@ -241,6 +242,8 @@ class TestNoMitigationsNeeded:
         )
         plan = mitigation_engine.generate_plan(profile, dag, registry)
         assert len(plan.mitigations) == 0
+        # With 0 required mitigations, residual == original (0.5^0 = 1)
+        assert plan.residual_risk == plan.original_risk
 
     def test_low_risk_no_required(
         self, mitigation_engine: MitigationEngine, registry: OperationRegistry,
@@ -257,6 +260,9 @@ class TestNoMitigationsNeeded:
         plan = mitigation_engine.generate_plan(profile, dag, registry)
         for m in plan.mitigations:
             assert m.priority != MitigationPriority.REQUIRED
+        # invoke_api is EXTERNAL -> should produce SANDBOX_EXTERNAL
+        actions = {m.action for m in plan.mitigations}
+        assert MitigationAction.SANDBOX_EXTERNAL in actions
 
 
 # ---------------------------------------------------------------------------
@@ -287,7 +293,7 @@ class TestIntegration:
 
         # Score the workflow
         risk_profile = scoring_engine.score(dag)
-        assert risk_profile.aggregate_score > 0
+        assert risk_profile.aggregate_score > 0.15  # 3 irreversible + 2 external + credentials
 
         # Generate mitigation plan
         plan = mitigation_engine.generate_plan(risk_profile, dag, registry)
@@ -301,8 +307,17 @@ class TestIntegration:
         # Credential access (authenticate) -> audit log
         assert MitigationAction.ADD_AUDIT_LOG in actions
 
-        # External ops (invoke_api, authenticate, execute_code) -> sandbox
+        # External ops (invoke_api, authenticate) -> sandbox
         assert MitigationAction.SANDBOX_EXTERNAL in actions
+
+        # Irreversible ops -> rollback
+        assert MitigationAction.ADD_ROLLBACK in actions
+
+        # User-facing (send_email) -> require authentication
+        assert MitigationAction.REQUIRE_AUTHENTICATION in actions
+
+        # Uncertain predecessor (lookup/invoke_api) before delete_posts -> retry
+        assert MitigationAction.ADD_RETRY in actions
 
         # Residual risk should be lower than original
         assert plan.residual_risk < plan.original_risk
@@ -368,4 +383,58 @@ class TestIntegration:
             if m.action == MitigationAction.REDUCE_PARALLELISM
         ]
         fan_out_targets = {nid for m in fan_out_mitigations for nid in m.target_node_ids}
-        assert "exec" in fan_out_targets
+        assert fan_out_targets == {"exec"}
+
+
+# ---------------------------------------------------------------------------
+# Coverage gaps (review fixes)
+# ---------------------------------------------------------------------------
+
+
+class TestCoverageGaps:
+    def test_cross_strategy_dedup(self, registry: OperationRegistry) -> None:
+        """Two different strategies producing the same (action, target) should deduplicate."""
+        from workflow_eval.types import Mitigation, MitigationAction, MitigationPriority
+
+        class StrategyA:
+            name = "a"
+            def __call__(self, dag, registry, profile):
+                return [Mitigation(
+                    action=MitigationAction.SANDBOX_EXTERNAL,
+                    priority=MitigationPriority.RECOMMENDED,
+                    target_node_ids=("x",),
+                    reason="from strategy A",
+                )]
+
+        class StrategyB:
+            name = "b"
+            def __call__(self, dag, registry, profile):
+                return [Mitigation(
+                    action=MitigationAction.SANDBOX_EXTERNAL,
+                    priority=MitigationPriority.RECOMMENDED,
+                    target_node_ids=("x",),
+                    reason="from strategy B",
+                )]
+
+        engine = MitigationEngine(strategies=(StrategyA(), StrategyB()))
+        dag = nx.DiGraph()
+        profile = RiskProfile(
+            workflow_name="t", aggregate_score=0.3, risk_level=RiskLevel.MEDIUM,
+            sub_scores=(), node_count=0, edge_count=0,
+        )
+        plan = engine.generate_plan(profile, dag, registry)
+        sandbox = [m for m in plan.mitigations if m.action == MitigationAction.SANDBOX_EXTERNAL]
+        assert len(sandbox) == 1
+
+    def test_unknown_op_error_propagates(
+        self, mitigation_engine: MitigationEngine, registry: OperationRegistry,
+    ) -> None:
+        """Engine propagates KeyError for unknown operations in the DAG."""
+        dag = nx.DiGraph()
+        dag.add_node("x", operation="nonexistent_op")
+        profile = RiskProfile(
+            workflow_name="t", aggregate_score=0.5, risk_level=RiskLevel.MEDIUM,
+            sub_scores=(), node_count=1, edge_count=0,
+        )
+        with pytest.raises(KeyError, match="nonexistent_op"):
+            mitigation_engine.generate_plan(profile, dag, registry)
