@@ -1,30 +1,30 @@
-"""Decorators and context managers for runtime workflow tracking (NOD-32).
+"""Decorators and context managers for runtime workflow tracking (NOD-32, NOD-33).
 
-NOD-32 spec (Linear):
-- instrumentation/sdk.py
-- async with workflow_context(name) as wf: creates a WorkflowExecution
-- Nested async with wf.operation(op_name, params=...) as op: adds DAGNode +
-  control_flow edge from previous operation
-- op.record_success() / op.record_failure(error)
-- wf.get_current_risk() runs scoring on in-progress DAG
+NOD-32: workflow_context + wf.operation() context managers
+NOD-33: @track_operation decorator
 
-AC:
+AC (NOD-32):
 - [x] Three sequential wf.operation() calls produce a 3-node linear DAG
       with 2 control_flow edges
 - [x] get_current_risk() returns a valid RiskProfile
 
-Behavioral constraints from description:
-- operation() is an async context manager yielding an OperationHandle
-- Sequential operations create a linear chain of control_flow edges
-- get_current_risk() runs scoring on the in-progress DAG
-- Auto-records success on clean exit, failure on exception
+AC (NOD-33):
+- [x] Decorated async function within a workflow_context adds a node to the DAG
+- [x] Exception in decorated function records failure outcome
+
+Behavioral constraints (NOD-33):
+- @track_operation(op_name, params=...) decorator for async functions
+- Registers with active workflow_context via contextvars
+- Records success if function returns, failure if it raises
 """
 
 from __future__ import annotations
 
+import functools
 import uuid
 from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator
+from contextvars import ContextVar
+from typing import Any, AsyncIterator, Callable, TypeVar
 
 from workflow_eval.dag.models import to_networkx
 from workflow_eval.ontology.defaults import get_default_registry
@@ -40,6 +40,11 @@ from workflow_eval.types import (
     ScoringConfig,
     WorkflowDAG,
     WorkflowExecution,
+)
+
+
+_active_context: ContextVar[WorkflowContext | None] = ContextVar(
+    "_active_context", default=None,
 )
 
 
@@ -161,4 +166,36 @@ async def workflow_context(
 ) -> AsyncIterator[WorkflowContext]:
     """Top-level async context manager for runtime workflow tracking."""
     wf = WorkflowContext(name, registry=registry, scoring_config=scoring_config)
-    yield wf
+    token = _active_context.set(wf)
+    try:
+        yield wf
+    finally:
+        _active_context.reset(token)
+
+
+def track_operation(
+    op_name: str, *, params: dict[str, Any] | None = None,
+) -> Callable:
+    """Decorator that registers an async function as a tracked operation.
+
+    Usage::
+
+        @track_operation("invoke_api", params={"endpoint": "/users"})
+        async def call_users_api():
+            ...
+
+    Must be called within an active ``workflow_context``.
+    Records success if the function returns, failure if it raises.
+    """
+    def decorator(fn: Callable) -> Callable:
+        @functools.wraps(fn)
+        async def wrapper(*args: Any, **kwargs: Any) -> Any:
+            wf = _active_context.get()
+            if wf is None:
+                raise RuntimeError(
+                    f"@track_operation({op_name!r}) called outside of a workflow_context"
+                )
+            async with wf.operation(op_name, params=params):
+                return await fn(*args, **kwargs)
+        return wrapper
+    return decorator
