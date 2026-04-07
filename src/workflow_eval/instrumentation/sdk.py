@@ -92,6 +92,7 @@ class WorkflowContext:
         self._name = name
         self._registry = registry or get_default_registry()
         self._scoring_config = scoring_config or ScoringConfig()
+        self._execution_id = uuid.uuid4().hex
         self._nodes: list[DAGNode] = []
         self._edges: list[DAGEdge] = []
         self._records: list[ExecutionRecord] = []
@@ -150,7 +151,7 @@ class WorkflowContext:
     def get_execution(self) -> WorkflowExecution:
         """Return a WorkflowExecution snapshot of the current state."""
         return WorkflowExecution(
-            id=uuid.uuid4().hex,
+            id=self._execution_id,
             workflow_name=self._name,
             dag=self.get_dag(),
             records=tuple(self._records),
@@ -163,14 +164,21 @@ async def workflow_context(
     *,
     registry: OperationRegistry | None = None,
     scoring_config: ScoringConfig | None = None,
+    recorder: Any | None = None,
 ) -> AsyncIterator[WorkflowContext]:
-    """Top-level async context manager for runtime workflow tracking."""
+    """Top-level async context manager for runtime workflow tracking.
+
+    If a ``WorkflowRecorder`` is provided, the execution is automatically
+    persisted to storage on context exit.
+    """
     wf = WorkflowContext(name, registry=registry, scoring_config=scoring_config)
     token = _active_context.set(wf)
     try:
         yield wf
     finally:
         _active_context.reset(token)
+        if recorder is not None:
+            recorder.record(wf)
 
 
 def track_operation(
