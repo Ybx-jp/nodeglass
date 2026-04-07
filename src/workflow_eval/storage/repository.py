@@ -131,8 +131,6 @@ class SQLiteWorkflowRepository:
         ).fetchall()
         return [self._row_to_execution(r) for r in rows]
 
-    # -- TODO(human) ----------------------------------------------------------
-
     @staticmethod
     def _row_to_execution(row: tuple) -> WorkflowExecution:
         """Reconstruct a WorkflowExecution from a database row.
