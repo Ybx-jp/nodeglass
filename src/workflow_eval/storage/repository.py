@@ -44,6 +44,8 @@ class WorkflowRepository(Protocol):
 
     def get_workflow(self, workflow_id: str) -> tuple[WorkflowDAG, RiskProfile]: ...
 
+    def list_workflows(self) -> list[tuple[str, WorkflowDAG]]: ...
+
     def store_execution(
         self, workflow_id: str, execution: WorkflowExecution,
     ) -> None: ...
@@ -85,6 +87,13 @@ class SQLiteWorkflowRepository:
         dag = WorkflowDAG.model_validate_json(row[0])
         risk_profile = RiskProfile.model_validate_json(row[1])
         return (dag, risk_profile)
+
+    def list_workflows(self) -> list[tuple[str, WorkflowDAG]]:
+        """List all stored workflows as (id, dag) pairs."""
+        rows = self._conn.execute(
+            "SELECT id, dag_json FROM workflows ORDER BY created_at",
+        ).fetchall()
+        return [(row[0], WorkflowDAG.model_validate_json(row[1])) for row in rows]
 
     # -- executions ------------------------------------------------------------
 
