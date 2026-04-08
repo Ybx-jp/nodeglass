@@ -1,14 +1,14 @@
 """WorkflowDAG networkx conversion and validation.
 
 NOD-11 spec (Linear):
-- to_networkx() -> nx.DiGraph with operation metadata on nodes, edge_type on edges
+- to_networkx() -> nx.DiGraph[str] with operation metadata on nodes, edge_type on edges
 - from_networkx(g) -> WorkflowDAG class method
 - Node IDs unique within a DAG (validated)
 - JSON round-trip preserves structure
 
 AC:
 - [x] Construct DAG from Pydantic models (nodes + edges lists)
-- [x] to_networkx() produces valid nx.DiGraph with all metadata
+- [x] to_networkx() produces valid nx.DiGraph[str] with all metadata
 - [x] from_networkx() reconstructs equivalent WorkflowDAG
 - [x] JSON round-trip: model_dump_json() -> model_validate_json()
 - [x] Node IDs are unique within a DAG (validated)
@@ -21,14 +21,14 @@ import networkx as nx
 from workflow_eval.types import DAGEdge, DAGNode, EdgeType, WorkflowDAG
 
 
-def to_networkx(dag: WorkflowDAG) -> nx.DiGraph:
+def to_networkx(dag: WorkflowDAG) -> nx.DiGraph[str]:
     """Convert a WorkflowDAG to a networkx DiGraph.
 
     Node attributes: operation, params (from DAGNode).
     Edge attributes: edge_type (from DAGEdge).
     Graph attributes: name, metadata (from WorkflowDAG).
     """
-    g = nx.DiGraph(name=dag.name, metadata=dag.metadata)
+    g: nx.DiGraph[str] = nx.DiGraph(name=dag.name, metadata=dag.metadata)
 
     for node in dag.nodes:
         g.add_node(
@@ -50,7 +50,7 @@ def to_networkx(dag: WorkflowDAG) -> nx.DiGraph:
     return g
 
 
-def from_networkx(g: nx.DiGraph) -> WorkflowDAG:
+def from_networkx(g: nx.DiGraph[str]) -> WorkflowDAG:
     """Reconstruct a WorkflowDAG from a networkx DiGraph.
 
     Expects node attributes: operation, params (optional).

@@ -52,7 +52,7 @@ class MitigationEngine:
     def generate_plan(
         self,
         risk_profile: RiskProfile,
-        dag: nx.DiGraph,
+        dag: nx.DiGraph[str],
         registry: OperationRegistry,
     ) -> MitigationPlan:
         """Run all strategies, deduplicate, sort, and estimate residual risk."""

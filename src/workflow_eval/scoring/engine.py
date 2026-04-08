@@ -46,7 +46,7 @@ class RiskScoringEngine:
             CompositionalScorer(),
         )
 
-    def score(self, dag: nx.DiGraph) -> RiskProfile:
+    def score(self, dag: nx.DiGraph[str]) -> RiskProfile:
         raw_scores = tuple(s.score(dag, self._registry) for s in self._scorers)
         weighted_scores = apply_weights(raw_scores, self._config)
         agg = aggregate(raw_scores, self._config)
@@ -64,7 +64,7 @@ class RiskScoringEngine:
         )
 
     def _find_critical_paths(
-        self, dag: nx.DiGraph,
+        self, dag: nx.DiGraph[str],
     ) -> tuple[tuple[str, ...], ...]:
         """Find the longest risk-weighted path from source to sink via topo-sort DP."""
         if dag.number_of_nodes() == 0:
@@ -94,7 +94,7 @@ class RiskScoringEngine:
         return (dp[best_sink][1],)
 
     def _find_chokepoints(
-        self, dag: nx.DiGraph, sub_scores: tuple[SubScore, ...],
+        self, dag: nx.DiGraph[str], sub_scores: tuple[SubScore, ...],
     ) -> tuple[str, ...]:
         """Nodes with high centrality AND high operation risk weight."""
         centrality_result = next(

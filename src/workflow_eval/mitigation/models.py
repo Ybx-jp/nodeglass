@@ -44,7 +44,7 @@ class MitigationStrategy(Protocol):
 
     def __call__(
         self,
-        dag: nx.DiGraph,
+        dag: nx.DiGraph[str],
         registry: OperationRegistry,
         risk_profile: RiskProfile,
     ) -> list[Mitigation]:

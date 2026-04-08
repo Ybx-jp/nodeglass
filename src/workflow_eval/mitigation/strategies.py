@@ -53,7 +53,7 @@ class MitigateIrreversibleOps:
 
     def __call__(
         self,
-        dag: nx.DiGraph,
+        dag: nx.DiGraph[str],
         registry: OperationRegistry,
         risk_profile: RiskProfile,
     ) -> list[Mitigation]:
@@ -90,7 +90,7 @@ class MitigateExternalOps:
 
     def __call__(
         self,
-        dag: nx.DiGraph,
+        dag: nx.DiGraph[str],
         registry: OperationRegistry,
         risk_profile: RiskProfile,
     ) -> list[Mitigation]:
@@ -120,7 +120,7 @@ class MitigateHighFanOut:
 
     def __call__(
         self,
-        dag: nx.DiGraph,
+        dag: nx.DiGraph[str],
         registry: OperationRegistry,
         risk_profile: RiskProfile,
     ) -> list[Mitigation]:
@@ -150,7 +150,7 @@ class MitigateCredentialAccess:
 
     def __call__(
         self,
-        dag: nx.DiGraph,
+        dag: nx.DiGraph[str],
         registry: OperationRegistry,
         risk_profile: RiskProfile,
     ) -> list[Mitigation]:
@@ -180,7 +180,7 @@ class MitigateUserFacingOps:
 
     def __call__(
         self,
-        dag: nx.DiGraph,
+        dag: nx.DiGraph[str],
         registry: OperationRegistry,
         risk_profile: RiskProfile,
     ) -> list[Mitigation]:
@@ -210,7 +210,7 @@ class MitigateHighRiskExternal:
 
     def __call__(
         self,
-        dag: nx.DiGraph,
+        dag: nx.DiGraph[str],
         registry: OperationRegistry,
         risk_profile: RiskProfile,
     ) -> list[Mitigation]:
@@ -243,7 +243,7 @@ class MitigateUncertainPredecessors:
 
     def __call__(
         self,
-        dag: nx.DiGraph,
+        dag: nx.DiGraph[str],
         registry: OperationRegistry,
         risk_profile: RiskProfile,
     ) -> list[Mitigation]:

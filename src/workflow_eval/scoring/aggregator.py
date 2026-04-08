@@ -28,7 +28,7 @@ _WEIGHT_FIELDS: dict[str, str] = {
 def aggregate(sub_scores: tuple[SubScore, ...], config: ScoringConfig) -> float:
     """Compute weighted sum of sub-scores."""
     weights = {name: getattr(config, field) for name, field in _WEIGHT_FIELDS.items()}
-    return sum(weights[s.name] * s.score for s in sub_scores)
+    return float(sum(weights[s.name] * s.score for s in sub_scores))
 
 
 def apply_weights(

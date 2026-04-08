@@ -63,4 +63,5 @@ def _parse(raw: str, suffix: str) -> dict[str, Any]:
             )
         return result
     else:
-        return json.loads(raw)
+        parsed: dict[str, Any] = json.loads(raw)
+        return parsed

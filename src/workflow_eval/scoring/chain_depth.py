@@ -30,7 +30,7 @@ class ChainDepthScorer:
 
     name: str = "chain_depth"
 
-    def score(self, dag: nx.DiGraph, registry: OperationRegistry) -> SubScore:
+    def score(self, dag: nx.DiGraph[str], registry: OperationRegistry) -> SubScore:
         n = dag.number_of_nodes()
         if n <= 1:
             return SubScore(name=self.name, score=0.0, weight=0.0, details={"longest_side_effect_path": []})

@@ -32,7 +32,7 @@ def _count_ratio(a: int, b: int) -> float:
     return 1.0 - abs(a - b) / max(a, b)
 
 
-def _jaccard_multiset(a: Counter, b: Counter) -> float:
+def _jaccard_multiset(a: Counter[str], b: Counter[str]) -> float:
     """Multiset Jaccard similarity: sum(min) / sum(max) over all keys."""
     all_keys = set(a) | set(b)
     if not all_keys:
