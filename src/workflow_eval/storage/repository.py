@@ -24,7 +24,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from workflow_eval.storage.migrations import initialize_db
 from workflow_eval.types import (
@@ -141,7 +141,7 @@ class SQLiteWorkflowRepository:
         return [self._row_to_execution(r) for r in rows]
 
     @staticmethod
-    def _row_to_execution(row: tuple) -> WorkflowExecution:
+    def _row_to_execution(row: tuple[Any, ...]) -> WorkflowExecution:
         """Reconstruct a WorkflowExecution from a database row.
 
         Row columns: (id, workflow_id, dag_json, records_json,

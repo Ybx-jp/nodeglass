@@ -34,7 +34,7 @@ class Scorer(Protocol):
 
     name: str
 
-    def score(self, dag: nx.DiGraph, registry: OperationRegistry) -> SubScore:
+    def score(self, dag: nx.DiGraph[str], registry: OperationRegistry) -> SubScore:
         """Score a workflow DAG from this scorer's perspective.
 
         Args:

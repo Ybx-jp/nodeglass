@@ -183,7 +183,7 @@ async def workflow_context(
 
 def track_operation(
     op_name: str, *, params: dict[str, Any] | None = None,
-) -> Callable:
+) -> Callable[..., Any]:
     """Decorator that registers an async function as a tracked operation.
 
     Usage::
@@ -195,7 +195,7 @@ def track_operation(
     Must be called within an active ``workflow_context``.
     Records success if the function returns, failure if it raises.
     """
-    def decorator(fn: Callable) -> Callable:
+    def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
         @functools.wraps(fn)
         async def wrapper(*args: Any, **kwargs: Any) -> Any:
             wf = _active_context.get()

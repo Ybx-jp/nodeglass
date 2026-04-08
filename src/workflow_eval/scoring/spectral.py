@@ -36,7 +36,7 @@ class SpectralScorer:
 
     name: str = "spectral"
 
-    def score(self, dag: nx.DiGraph, registry: OperationRegistry) -> SubScore:
+    def score(self, dag: nx.DiGraph[str], registry: OperationRegistry) -> SubScore:
         n = dag.number_of_nodes()
 
         if n <= 1:

@@ -1,0 +1,142 @@
+# Default ontology — 20 built-in agent operation definitions.
+#
+# Loadable via: OperationRegistry.from_yaml("config/default_ontology.yaml")
+# Produces an identical registry to workflow_eval.ontology.defaults.
+#
+# Fields:
+#   name:             unique operation identifier
+#   category:         logical grouping (io, database, network, etc.)
+#   base_risk_weight: 0.0–1.0 risk in isolation
+#   effect_type:      pure | stateful | external | irreversible
+#   effect_targets:   what the operation touches (filesystem, database, etc.)
+
+operations:
+
+  # --- I/O ---
+  - name: read_file
+    category: io
+    base_risk_weight: 0.05
+    effect_type: pure
+    effect_targets: [filesystem]
+
+  - name: write_file
+    category: io
+    base_risk_weight: 0.35
+    effect_type: stateful
+    effect_targets: [filesystem]
+
+  - name: delete_file
+    category: io
+    base_risk_weight: 0.80
+    effect_type: irreversible
+    effect_targets: [filesystem]
+
+  # --- Database ---
+  - name: read_database
+    category: database
+    base_risk_weight: 0.05
+    effect_type: pure
+    effect_targets: [database]
+
+  - name: write_database
+    category: database
+    base_risk_weight: 0.40
+    effect_type: stateful
+    effect_targets: [database]
+
+  - name: delete_record
+    category: database
+    base_risk_weight: 0.85
+    effect_type: irreversible
+    effect_targets: [database]
+
+  # --- Network ---
+  - name: invoke_api
+    category: network
+    base_risk_weight: 0.30
+    effect_type: external
+    effect_targets: [network]
+
+  - name: send_webhook
+    category: network
+    base_risk_weight: 0.35
+    effect_type: external
+    effect_targets: [network]
+
+  # --- State ---
+  - name: mutate_state
+    category: state
+    base_risk_weight: 0.25
+    effect_type: stateful
+    effect_targets: [memory]
+
+  - name: read_state
+    category: state
+    base_risk_weight: 0.02
+    effect_type: pure
+    effect_targets: [memory]
+
+  # --- Control flow ---
+  - name: branch
+    category: control
+    base_risk_weight: 0.10
+    effect_type: pure
+    effect_targets: []
+
+  - name: loop
+    category: control
+    base_risk_weight: 0.15
+    effect_type: pure
+    effect_targets: []
+
+  # --- Execution ---
+  - name: execute_code
+    category: execution
+    base_risk_weight: 0.60
+    effect_type: external
+    effect_targets: [filesystem, memory, network]
+
+  # --- Auth ---
+  - name: authenticate
+    category: auth
+    base_risk_weight: 0.20
+    effect_type: external
+    effect_targets: [credentials, network]
+
+  - name: authorize
+    category: auth
+    base_risk_weight: 0.15
+    effect_type: pure
+    effect_targets: [credentials]
+
+  - name: read_credentials
+    category: auth
+    base_risk_weight: 0.45
+    effect_type: pure
+    effect_targets: [credentials]
+
+  # --- Communication ---
+  - name: send_email
+    category: communication
+    base_risk_weight: 0.50
+    effect_type: irreversible
+    effect_targets: [network, user_facing]
+
+  - name: send_notification
+    category: communication
+    base_risk_weight: 0.40
+    effect_type: external
+    effect_targets: [network, user_facing]
+
+  # --- Resource lifecycle ---
+  - name: create_resource
+    category: resource
+    base_risk_weight: 0.55
+    effect_type: external
+    effect_targets: [network, system_config]
+
+  - name: destroy_resource
+    category: resource
+    base_risk_weight: 0.90
+    effect_type: irreversible
+    effect_targets: [network, system_config]

@@ -84,7 +84,7 @@ class CompositionalScorer:
         # 3. No match — neutral multiplier
         return 1.0
 
-    def score(self, dag: nx.DiGraph, registry: OperationRegistry) -> SubScore:
+    def score(self, dag: nx.DiGraph[str], registry: OperationRegistry) -> SubScore:
         if dag.number_of_edges() == 0:
             return SubScore(
                 name=self.name,
@@ -122,5 +122,5 @@ class CompositionalScorer:
             name=self.name,
             score=score_val,
             weight=0.0,
-            details=best,  # type: ignore[arg-type]
+            details=best,
         )

@@ -31,7 +31,7 @@ _UNCERTAIN_TYPES = frozenset({EffectType.EXTERNAL, EffectType.STATEFUL, EffectTy
 _FLAGGED_THRESHOLD = 0.3
 
 
-def _compute_node_depths(dag: nx.DiGraph) -> dict[str, int]:
+def _compute_node_depths(dag: nx.DiGraph[str]) -> dict[str, int]:
     """Compute the depth of each node in the DAG (edge count from nearest root).
 
     Depth = length of the longest path from any source node (in-degree 0)
@@ -56,7 +56,7 @@ class IrreversibilityScorer:
 
     name: str = "irreversibility"
 
-    def score(self, dag: nx.DiGraph, registry: OperationRegistry) -> SubScore:
+    def score(self, dag: nx.DiGraph[str], registry: OperationRegistry) -> SubScore:
         n = dag.number_of_nodes()
         if n <= 1:
             return SubScore(name=self.name, score=0.0, weight=0.0, details={"irrev_risks": {}})
