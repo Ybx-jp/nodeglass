@@ -214,70 +214,19 @@ def _print_risk_profile(state: dict[str, Any]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Mermaid export
+# Mermaid export (delegated to shared renderer)
 # ---------------------------------------------------------------------------
 
-def _mermaid_node_label(node: dict[str, Any]) -> str:
-    """Build a display label for a Mermaid node."""
-    op = node["operation"]
-    tool = node.get("params", {}).get("tool", "")
-    if tool and tool != op:
-        return f"{node['id']}\\n{op}\\n({tool})"
-    return f"{node['id']}\\n{op}"
-
-
-_IRREVERSIBLE_OPS = frozenset({
-    "delete_file", "delete_record", "destroy_resource", "send_email",
-})
-_EXTERNAL_OPS = frozenset({
-    "invoke_api", "send_webhook", "execute_code", "send_notification",
-    "authenticate", "create_resource",
-})
-_STATEFUL_OPS = frozenset({
-    "write_file", "write_database", "mutate_state",
-})
-
-
-def _mermaid_node_shape(node: dict[str, Any]) -> tuple[str, str]:
-    """Return (open_bracket, close_bracket) for Mermaid node shape.
-
-    Shapes by effect type:
-      pure         → rounded stadium  ("...")
-      stateful     → rectangle         [...]
-      external     → subroutine        [[...]]
-      irreversible → hexagon            {{...}}
-    """
-    op = node["operation"]
-    if op in _IRREVERSIBLE_OPS:
-        return "{{", "}}"
-    if op in _EXTERNAL_OPS:
-        return "[[", "]]"
-    if op in _STATEFUL_OPS:
-        return "[", "]"
-    # pure (reads, control flow)
-    return "(", ")"
+from dag_render import (
+    mermaid_node_label as _mermaid_node_label,
+    mermaid_node_shape as _mermaid_node_shape,
+    render_mermaid,
+)
 
 
 def _print_mermaid(session_id: str, nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> None:
     """Output a valid Mermaid flowchart."""
-    print(f"flowchart TD")
-    print(f"  %% Session: {session_id}")
-
-    for node in nodes:
-        nid = node["id"]
-        label = _mermaid_node_label(node)
-        open_b, close_b = _mermaid_node_shape(node)
-        print(f"  {nid}{open_b}\"{label}\"{close_b}")
-
-    for edge in edges:
-        etype = edge.get("edge_type", "control_flow")
-        if etype == "data_flow":
-            print(f"  {edge['source_id']} -.-> {edge['target_id']}")
-        elif etype == "conditional":
-            cond = edge.get("condition", "?")
-            print(f"  {edge['source_id']} -->|{cond}| {edge['target_id']}")
-        else:
-            print(f"  {edge['source_id']} --> {edge['target_id']}")
+    render_mermaid(session_id, nodes, edges, file=sys.stdout)
 
 
 # ---------------------------------------------------------------------------

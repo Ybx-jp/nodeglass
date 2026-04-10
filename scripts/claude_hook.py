@@ -156,6 +156,10 @@ def score_dag(state: dict[str, Any]) -> dict[str, Any]:
         "risk_level": profile.risk_level.value,
         "breakdown": breakdown,
         "node_count": profile.node_count,
+        "sub_scores": [
+            {"name": s.name, "score": s.score, "weight": s.weight}
+            for s in profile.sub_scores
+        ],
     }
 
 
@@ -210,6 +214,13 @@ def main() -> None:
         f"({result['node_count']} ops) | {result['breakdown']} | "
         f"{step_id}: {operation} via {tool_desc}"
     )
+
+    # Render visual DAG to stderr (appears before the permission prompt)
+    try:
+        from dag_render import render_dag_visual
+        render_dag_visual(state, current_step=step_id, result=result, file=sys.stderr)
+    except Exception:
+        pass  # Visual is best-effort — never block the hook
 
     output = {
         "hookSpecificOutput": {
