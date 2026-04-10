@@ -182,23 +182,21 @@ def main() -> None:
     # Map tool → operation
     operation = map_tool(tool_name, tool_input)
 
-    # Fast path: pure reads skip scoring
+    # Always accumulate into session DAG (even reads, for complete context)
+    state = load_state(session_id)
+    state = append_node(state, operation, tool_name, tool_input)
+    save_state(state)
+
+    # Fast path: pure reads — tracked but not scored/prompted
     if operation in _SKIP_SCORING_OPS:
         sys.exit(0)
 
-    # Accumulate into session DAG
-    state = load_state(session_id)
-    state = append_node(state, operation, tool_name, tool_input)
-
-    # Score
+    # Score the full accumulated DAG
     try:
         result = score_dag(state)
     except Exception as exc:
         print(f"workflow-eval: scoring error: {exc}", file=sys.stderr)
-        save_state(state)
         sys.exit(0)
-
-    save_state(state)
 
     # Build reason string
     step_id = f"step_{state['step_counter'] - 1}"
@@ -208,7 +206,7 @@ def main() -> None:
         tool_desc = f"Bash({cmd[:60]})"
 
     reason = (
-        f"workflow-eval: {result['aggregate']:.2f} {result['risk_level'].upper()} "
+        f"[WORKFLOW-EVAL] {result['aggregate']:.2f} {result['risk_level'].upper()} "
         f"({result['node_count']} ops) | {result['breakdown']} | "
         f"{step_id}: {operation} via {tool_desc}"
     )
